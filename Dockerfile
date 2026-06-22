@@ -40,7 +40,7 @@ RUN apt-get update && \
 # Node 20 LTS instead of node:16 (EOL). The build always runs on the build host.
 ###############################################################################
 ARG BUILDPLATFORM
-FROM --platform=${BUILDPLATFORM} node:20-bookworm AS frontend
+FROM --platform=${BUILDPLATFORM} node:26-bookworm AS frontend
 WORKDIR /build
 COPY ["package.json", "package-lock.json", "angular.json", "tsconfig.json", "./"]
 COPY ["src/", "./src/"]
@@ -55,7 +55,7 @@ RUN npm install --legacy-peer-deps && \
 ###############################################################################
 # Stage 3 — Install backend dependencies (production)
 ###############################################################################
-FROM node:20-bookworm-slim AS backend
+FROM node:26-bookworm-slim AS backend
 ENV NO_UPDATE_NOTIFIER=true
 WORKDIR /app
 COPY ["backend/package.json", "backend/package-lock.json", "./"]
@@ -90,7 +90,7 @@ EOF
 ###############################################################################
 # Stage 4 — Final image
 ###############################################################################
-FROM node:20-bookworm-slim AS final
+FROM node:26-bookworm-slim AS final
 
 ARG DEBIAN_FRONTEND=noninteractive
 ENV USER=youtube \
