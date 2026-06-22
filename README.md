@@ -172,7 +172,7 @@ git push -u origin main
 
 If this edition helps you, I'd appreciate a small donation – thank you! ☕
 
-[![ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/andyxtreme)
+[![Ko-fi](https://img.shields.io/badge/Ko--fi-Support%20me-FF5E5B?logo=kofi&logoColor=white)](https://ko-fi.com/andyxtreme)
 
 ## Credits & License
 
