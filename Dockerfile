@@ -6,7 +6,7 @@
 # Ubuntu 22.04: the helper scripts are hard-wired for it (package names like
 # libicu70, self-install of curl/jq/unzip). This stage only produces static
 # binaries, so the distro is not critical here.
-FROM ubuntu:22.04 AS utils
+FROM ubuntu:26.04 AS utils
 ENV DEBIAN_FRONTEND=noninteractive
 ARG TARGETPLATFORM
 WORKDIR /utils
