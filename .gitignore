@@ -1,0 +1,78 @@
+# See http://help.github.com/ignore-files/ for more about ignoring files.
+
+# compiled output
+/dist
+/tmp
+/out-tsc
+
+# dependencies
+/node_modules
+
+# IDEs and editors
+/.idea
+.project
+.classpath
+.c9/
+*.launch
+.settings/
+*.sublime-workspace
+
+# IDE - VSCode
+.vscode/*
+!.vscode/settings.json
+!.vscode/tasks.json
+!.vscode/launch.json
+!.vscode/extensions.json
+
+# misc
+/.angular/cache
+/.sass-cache
+/connect.lock
+/coverage
+/libpeerconnection.log
+npm-debug.log
+testem.log
+/typings
+
+# e2e
+/e2e/*.js
+/e2e/*.map
+
+# System Files
+.DS_Store
+Thumbs.db
+
+node_modules/*
+backend/node_modules/*
+YoutubeDL-Material/node_modules/*
+backend/subscriptions/archives/*
+backend/subscriptions/playlists/*
+backend/subscriptions/channels/*
+backend/db.json
+backend/public/assets/i18n/*.xlf
+backend/public/assets/default.json
+backend/subscriptions/channels/*
+backend/subscriptions/playlists/*
+backend/subscriptions/archives/*
+backend/*.exe
+src/assets/default.json
+backend/appdata/db.json
+backend/appdata/archives/archive_audio.txt
+backend/appdata/archives/archive_video.txt
+backend/appdata/archives/blacklist_audio.txt
+backend/appdata/archives/blacklist_video.txt
+backend/appdata/logs/combined.log
+backend/appdata/logs/error.log
+backend/appdata/users.json
+backend/users/*
+backend/appdata/cookies.txt
+backend/public
+src/assets/i18n/*.json
+
+# User Files
+db/
+appdata/
+audio/
+video/
+subscriptions/
+users/

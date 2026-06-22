@@ -1,0 +1,46 @@
+.notification-divider {
+    margin-bottom: 10px;
+    margin-top: 10px;
+}
+
+.notification-text {
+    margin-left: 10px;
+    margin-right: 10px;
+    display: inline-block;
+}
+
+.notification-timestamp {
+    font-size: 14px;
+}
+
+.notification-card-parent {
+    margin: 5px;
+}
+
+.notification-card {
+    margin-top: 5px;
+}
+
+.notification-actions {
+    margin-top: auto;
+}
+
+.card-radius {
+    border-radius: 12px;
+    height: 166px;
+}
+
+.dot {
+    height: 8px;
+    width: 8px;
+    background-color: red;
+    border-radius: 50%;
+    display: inline-block;
+    position: absolute;
+    right: 8px;
+    top: 8px;
+}
+
+.viewport {
+    height: 100%;
+}

@@ -1,0 +1,29 @@
+.operator-select {
+    width: 90px;
+}
+
+.property-select {
+    margin-left: 10px;
+    width: 110px;
+}
+
+.comparator-select {
+    margin-left: 10px;
+}
+
+.value-input {
+    margin-left: 10px;
+}
+
+:host ::ng-deep.mdc-list-item {
+    height: 75px !important;
+}
+
+:host ::ng-deep.mdc-list-item__content {
+    pointer-events: unset;
+}
+
+.rule-buttons {
+    position: relative;
+    top: 8px;
+}

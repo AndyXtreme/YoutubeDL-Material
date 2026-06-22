@@ -1,0 +1,28 @@
+# Normalize line endings. This project targets Linux containers, so text files
+# are stored and checked out with LF — even on Windows. This prevents shell
+# scripts from breaking inside the container with CRLF line endings.
+* text=auto eol=lf
+
+# Files that must always be LF (executed inside Linux containers).
+*.sh    text eol=lf
+Dockerfile text eol=lf
+*.Dockerfile text eol=lf
+
+# Windows-only scripts keep CRLF (none currently, but future-proof).
+*.bat   text eol=crlf
+*.cmd   text eol=crlf
+*.ps1   text eol=crlf
+
+# Treat common binary assets as binary (never convert line endings).
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.ico   binary
+*.webp  binary
+*.woff  binary
+*.woff2 binary
+*.ttf   binary
+*.eot   binary
+*.mp4   binary
+*.zip   binary

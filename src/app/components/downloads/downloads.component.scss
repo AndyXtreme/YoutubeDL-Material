@@ -1,0 +1,40 @@
+mat-header-cell, mat-cell {
+    justify-content: center;
+}
+
+.one-line {
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.icon-button-spinner {
+    position: absolute;
+    top: -13px;
+    left: 10px;
+}
+
+.button-span {
+    position: relative;;
+}
+
+.downloads-action-button-div {
+    margin-left: 5px;
+}
+
+.downloads-action-button {
+    margin-top: 10px;
+    margin-right: 10px;
+}
+
+.rounded-top {
+    border-radius: 16px 16px 0px 0px !important;
+}
+
+.rounded-bottom {
+    border-radius: 0px 0px 16px 16px !important;
+}
+
+.rounded {
+    border-radius: 16px 16px 16px 16px !important;
+}

@@ -1,0 +1,13 @@
+.notification-title {
+    margin-bottom: 6px;
+    text-align: center
+}
+
+.notifications-list-parent {
+    overflow-y: auto;
+    padding: 0px 10px 10px 10px;
+}
+
+.notifications-list {
+    display: block
+}

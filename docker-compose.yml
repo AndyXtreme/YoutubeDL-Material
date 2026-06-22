@@ -1,0 +1,48 @@
+services:
+  ytdl-mongo-db:
+    container_name: youtubedl-mongo
+    image: mongo:7
+    logging:
+      driver: none
+    restart: unless-stopped
+    volumes:
+      # Named volume for the database (managed by Docker).
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping')"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+
+  ytdl_material:
+    container_name: youtubedl-material
+    # Prebuilt multi-arch image from Docker Hub (amd64 + arm64).
+    image: andyxtreme/youtubedl-material:latest
+    depends_on:
+      ytdl-mongo-db:
+        condition: service_healthy
+    environment:
+      ALLOW_CONFIG_MUTATIONS: 'true'
+      write_ytdl_config: 'true'
+      ytdl_mongodb_connection_string: mongodb://ytdl-mongo-db:27017
+      ytdl_use_local_db: 'false'
+      # Optional: set your own UID/GID (default is 1000:1000)
+      # UID: '1000'
+      # GID: '1000'
+    ports:
+      # HOST:CONTAINER — web UI then available at http://<HOST-IP>:17442
+      - '17442:17442'
+    restart: unless-stopped
+    volumes:
+      # Relative paths store the data in subfolders next to this file.
+      # For a NAS or similar, just replace them with absolute host paths, e.g.:
+      #   - /mnt/pool/Ytdl_material/appdata:/app/appdata
+      - ./appdata:/app/appdata
+      - ./audio:/app/audio
+      - ./video:/app/video
+      - ./subscriptions:/app/subscriptions
+      - ./users:/app/users
+
+volumes:
+  mongo-data:
