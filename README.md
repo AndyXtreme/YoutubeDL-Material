@@ -15,7 +15,7 @@ The original project was built on **Node 16** (end-of-life) and **MongoDB 4**. A
 | MongoDB (Compose) | `mongo:4` (EOL) | **`mongo:7`** with healthcheck |
 | JS runtime for yt-dlp | missing | **Deno** bundled into the image |
 | Subscription file names | `%(playlist_index)s` → `NA` | **backend patch** injects the real index |
-| Long playlists | capped at 100 videos | note + custom arg to fetch **all** videos |
+| Long playlists | capped at 100 videos | documented: use cookies, and **avoid** `youtubetab:skip=webpage` (caps at 200) |
 
 All changes are documented in the [Dockerfile](Dockerfile) and applied **automatically at build time** – the source code itself is not permanently modified (the `playlist_index` patch is applied during the build and aborts the build if the anchor code changes).
 
@@ -96,33 +96,43 @@ volumes:
 
 ## ⚠️ Important notes for playlists & subscriptions
 
-YouTube and yt-dlp have two quirks you should know about. Neither is **a bug of this edition**, but both can be solved cleanly with two settings.
+YouTube and yt-dlp have a few quirks you should know about. None of them is **a bug of this edition**, but each can be solved cleanly with a setting.
 
-### 1. Long playlists (more than 100 videos)
+### 1. Long playlists — do **not** use `youtubetab:skip=webpage` anymore
 
-If a playlist contains more than 100 videos **and** some unavailable (deleted/private) videos, yt-dlp switches to an API path that only returns **the first 100 entries**. Symptom: a playlist with e.g. 162 videos only downloads 100.
+Earlier versions of this README recommended the custom argument
+`--extractor-args,,youtubetab:skip=webpage` to work around yt-dlp returning only
+the first 100 entries of a long playlist. **That recommendation is obsolete and now
+causes the very problem it was meant to fix.**
 
-**Solution – set a custom argument:**
+`skip=webpage` makes yt-dlp use YouTube's InnerTube API exclusively. YouTube has since
+started capping that path after two continuation pages, so playlists silently stop at
+**200 videos** — confirmed in practice: removing the argument immediately fetched more.
 
+**Solution: remove the argument** from
+
+- the subscription's edit dialog under **Custom args**, and
+- **Settings → Advanced → Custom args** (the global field, used by manual downloads).
+
+If you previously added the global yt-dlp config to the [Dockerfile](Dockerfile)
+(`printf ... > /etc/yt-dlp.conf`), remove that line and rebuild.
+
+**How to check your own playlist** — compare the entry count with and without the argument:
+
+```bash
+docker exec -it <container> sh -lc \
+  './appdata/bin/yt-dlp --cookies appdata/cookies.txt --flat-playlist --print "%(playlist_index)s" "<PLAYLIST_URL>" | wc -l'
 ```
---extractor-args,,youtubetab:skip=webpage
-```
 
-(YTM separates multiple arguments with **`,,`** – two commas.)
+Two more things matter for long playlists:
 
-Where to enter it:
-
-- **Per subscription:** in the subscription's edit dialog under **Custom args**.
-  *(Subscriptions intentionally do not use the global custom-args field – each subscription needs its own entry.)*
-- **For manual playlist downloads** (from the home page): under **Settings → Advanced → Custom args** (the global field).
-
-`youtubetab:skip=webpage` only affects the playlist/channel extractor; it is ignored for single videos and is therefore harmless.
-
-> **Optional, global for everything:** Instead of maintaining the argument in each place, you can add a global yt-dlp config to the [Dockerfile](Dockerfile) that applies to *every* call (subscriptions **and** downloads):
-> ```dockerfile
-> RUN printf '%s\n' '--extractor-args youtubetab:skip=webpage' > /etc/yt-dlp.conf
-> ```
-> After that, no custom-args fields are needed anymore.
+- **Cookies.** Enable **Settings → Advanced → use cookies** and place `cookies.txt` in
+  `appdata/`. Without it the run is anonymous and YouTube throttles enumeration much
+  earlier. If the file is missing, YTM logs a warning and continues *without* cookies —
+  check with `grep -i cookies appdata/logs/combined.log`.
+- **Downloader.** **Settings → Advanced → Select a downloader** must be `yt-dlp`.
+  The unrelated checkbox *“Use default downloading agent”* only picks the external
+  fragment downloader (aria2c, curl, …) and has no effect on playlist enumeration.
 
 ### 2. File naming with playlist position
 
