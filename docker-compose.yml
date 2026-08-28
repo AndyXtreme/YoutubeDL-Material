@@ -23,8 +23,7 @@ services:
       ytdl-mongo-db:
         condition: service_healthy
     environment:
-      ALLOW_CONFIG_MUTATIONS: 'true'
-      write_ytdl_config: 'true'
+      TZ: Europe/Berlin
       ytdl_mongodb_connection_string: mongodb://ytdl-mongo-db:27017
       ytdl_use_local_db: 'false'
       # Optional: set your own UID/GID (default is 1000:1000)

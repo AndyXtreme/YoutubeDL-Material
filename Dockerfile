@@ -20,6 +20,8 @@ RUN sh ./fetch-twitchdownloader.sh
 # YouTube extraction; without one it prints a warning to stderr — and that very
 # warning makes YTM's playlist/subscription lookup fail.
 # yt-dlp uses Deno automatically by default (no extra arguments needed).
+# Pinned so a build stays reproducible and a Deno release can't break it silently.
+ARG DENO_VERSION=v2.9.6
 RUN apt-get update && \
     apt-get install -y --no-install-recommends curl ca-certificates unzip && \
     arch="$(dpkg --print-architecture)" && \
@@ -28,7 +30,7 @@ RUN apt-get update && \
         arm64) deno_arch="aarch64-unknown-linux-gnu" ;; \
         *) echo "Unsupported architecture for Deno: $arch" && exit 1 ;; \
     esac && \
-    curl -fsSL "https://github.com/denoland/deno/releases/latest/download/deno-${deno_arch}.zip" -o /tmp/deno.zip && \
+    curl -fsSL "https://github.com/denoland/deno/releases/download/${DENO_VERSION}/deno-${deno_arch}.zip" -o /tmp/deno.zip && \
     unzip /tmp/deno.zip -d /usr/local/bin && \
     chmod +x /usr/local/bin/deno && \
     rm /tmp/deno.zip && \

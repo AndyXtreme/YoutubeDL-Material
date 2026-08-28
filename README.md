@@ -15,7 +15,7 @@ The original project was built on **Node 16** (end-of-life) and **MongoDB 4**. A
 | MongoDB (Compose) | `mongo:4` (EOL) | **`mongo:7`** with healthcheck |
 | JS runtime for yt-dlp | missing | **Deno** bundled into the image |
 | Subscription file names | `%(playlist_index)s` → `NA` | **backend patch** injects the real index |
-| Long playlists | capped at 100 videos | documented: use cookies, and **avoid** `youtubetab:skip=webpage` (caps at 200) |
+| Long playlists | capped at 100 videos | documented: cookies + `yt-dlp` as downloader, no custom args |
 
 All changes are documented in the [Dockerfile](Dockerfile) and applied **automatically at build time** – the source code itself is not permanently modified (the `playlist_index` patch is applied during the build and aborts the build if the anchor code changes).
 
@@ -98,33 +98,15 @@ volumes:
 
 YouTube and yt-dlp have a few quirks you should know about. None of them is **a bug of this edition**, but each can be solved cleanly with a setting.
 
-### 1. Long playlists — do **not** use `youtubetab:skip=webpage` anymore
+### 1. Long playlists
 
-Earlier versions of this README recommended the custom argument
-`--extractor-args,,youtubetab:skip=webpage` to work around yt-dlp returning only
-the first 100 entries of a long playlist. **That recommendation is obsolete and now
-causes the very problem it was meant to fix.**
+No custom arguments are needed. If a subscription's **Custom args** or the global
+field under **Settings → Advanced → Custom args** still contains
+`--extractor-args,,youtubetab:skip=webpage`, remove it: it forces yt-dlp onto
+YouTube's InnerTube API, which YouTube caps after two continuation pages, so
+enumeration stops silently at 200 videos.
 
-`skip=webpage` makes yt-dlp use YouTube's InnerTube API exclusively. YouTube has since
-started capping that path after two continuation pages, so playlists silently stop at
-**200 videos** — confirmed in practice: removing the argument immediately fetched more.
-
-**Solution: remove the argument** from
-
-- the subscription's edit dialog under **Custom args**, and
-- **Settings → Advanced → Custom args** (the global field, used by manual downloads).
-
-If you previously added the global yt-dlp config to the [Dockerfile](Dockerfile)
-(`printf ... > /etc/yt-dlp.conf`), remove that line and rebuild.
-
-**How to check your own playlist** — compare the entry count with and without the argument:
-
-```bash
-docker exec -it <container> sh -lc \
-  './appdata/bin/yt-dlp --cookies appdata/cookies.txt --flat-playlist --print "%(playlist_index)s" "<PLAYLIST_URL>" | wc -l'
-```
-
-Two more things matter for long playlists:
+Two settings do matter:
 
 - **Cookies.** Enable **Settings → Advanced → use cookies** and place `cookies.txt` in
   `appdata/`. Without it the run is anonymous and YouTube throttles enumeration much
@@ -133,6 +115,12 @@ Two more things matter for long playlists:
 - **Downloader.** **Settings → Advanced → Select a downloader** must be `yt-dlp`.
   The unrelated checkbox *“Use default downloading agent”* only picks the external
   fragment downloader (aria2c, curl, …) and has no effect on playlist enumeration.
+
+Counting a playlist yourself:
+
+```bash
+docker exec -it youtubedl-material sh -lc './appdata/bin/yt-dlp --cookies appdata/cookies.txt --flat-playlist --print "%(playlist_index)s" "<PLAYLIST_URL>" | wc -l'
+```
 
 ### 2. File naming with playlist position
 
@@ -160,21 +148,6 @@ Note: YTM automatically creates a folder per playlist for subscriptions (`subscr
 ### 3. Subscription interval
 
 Subscriptions are **not** checked in real time, but on a fixed interval (Settings → Subscriptions → *Check interval*, in seconds). New videos appear only at the next check; alternatively, refresh the subscription manually in the UI.
-
----
-
-## Create your own GitHub repo
-
-This folder contains the complete project files **without** the original Git history. To create your own repo:
-
-```bash
-git init
-git add .
-git commit -m "Modernized YoutubeDL-Material (Node 20, Mongo 7, Deno, patches)"
-git branch -M main
-git remote add origin https://github.com/<YOUR-USER>/<YOUR-REPO>.git
-git push -u origin main
-```
 
 ---
 
