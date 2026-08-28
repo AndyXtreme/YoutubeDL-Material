@@ -4,7 +4,11 @@
 # and also optimizing some code with this commit.
 # xoxo :D
 
-case $(uname -m) in
+# TARGET_MACHINE lets the Dockerfile fetch for another architecture than the one
+# this script runs on, so multi-arch builds don't need QEMU here.
+MACHINE="${TARGET_MACHINE:-$(uname -m)}"
+
+case $MACHINE in
   x86_64)
     ARCH=amd64;;
   aarch64)
@@ -16,7 +20,7 @@ case $(uname -m) in
   armv7l)
     ARCH=armel;;
   *)
-    echo "Unsupported architecture: $(uname -m)"
+    echo "Unsupported architecture: $MACHINE"
     exit 1
 esac
 
@@ -24,12 +28,14 @@ echo "(INFO) Architecture detected: $ARCH"
 echo "(1/5) READY - Acquire temp dependencies in ffmpeg obtain layer"
 apt-get update && apt-get -y install curl xz-utils
 echo "(2/5) DOWNLOAD - Acquire latest ffmpeg and ffprobe from John van Sickle's master-sourced builds in ffmpeg obtain layer"
-curl -o ffmpeg.txz \
-    --connect-timeout 5 \
-    --max-time 120 \
+# -f + --retry-all-errors: see fetch-twitchdownloader.sh — emulated builds hit
+# transient TLS resets that the default retry list ignores.
+curl -f -o ffmpeg.txz \
+    --connect-timeout 10 \
+    --max-time 180 \
     --retry 5 \
-    --retry-delay 0 \
-    --retry-max-time 40 \
+    --retry-delay 2 \
+    --retry-all-errors \
     "https://johnvansickle.com/ffmpeg/old-releases/ffmpeg-5.1.1-${ARCH}-static.tar.xz"
 mkdir /tmp/ffmpeg
 tar xf ffmpeg.txz -C /tmp/ffmpeg

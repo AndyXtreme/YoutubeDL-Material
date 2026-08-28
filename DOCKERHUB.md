@@ -32,6 +32,7 @@ Self-hosted, no cloud, no account anywhere. Multi-arch: **amd64 + arm64**.
 | MongoDB | `mongo:4` (EOL) | **`mongo:7`** with healthcheck |
 | JS runtime for yt-dlp | missing – subscriptions break | **Deno** bundled in |
 | `%(playlist_index)s` in subscriptions | resolves to `NA` | **backend patch** injects the real index |
+| Twitch VOD chat | `TwitchDownloaderCLI` aborts (no ICU in the image) | **`libicu72`** installed |
 | Architectures | amd64 | **amd64 + arm64** |
 
 The patch is applied at build time and aborts the build if the upstream code it

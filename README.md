@@ -15,6 +15,8 @@ The original project was built on **Node 16** (end-of-life) and **MongoDB 4**. A
 | MongoDB (Compose) | `mongo:4` (EOL) | **`mongo:7`** with healthcheck |
 | JS runtime for yt-dlp | missing | **Deno** bundled into the image |
 | Subscription file names | `%(playlist_index)s` → `NA` | **backend patch** injects the real index |
+| Twitch VOD chat | `TwitchDownloaderCLI` aborts (no ICU in the image) | **`libicu72`** installed |
+| Architectures | amd64 | **amd64 + arm64** |
 | Long playlists | capped at 100 videos | documented: cookies + `yt-dlp` as downloader, no custom args |
 
 All changes are documented in the [Dockerfile](Dockerfile) and applied **automatically at build time** – the source code itself is not permanently modified (the `playlist_index` patch is applied during the build and aborts the build if the anchor code changes).
@@ -56,6 +58,14 @@ Clone this repository, then build the image yourself, tagging it with the name t
 docker build -t andyxtreme/youtubedl-material:latest .
 docker compose up -d
 ```
+
+For both architectures at once (needs a registry to push to, since a manifest list can't live in the local image store):
+
+```bash
+docker build --platform linux/amd64,linux/arm64 -t <user>/youtubedl-material:latest --push .
+```
+
+The helper stage that fetches ffmpeg and TwitchDownloaderCLI runs unemulated on the build host and downloads binaries for the target architecture, so the arm64 build doesn't depend on QEMU behaving.
 
 Since the image then already exists locally, Compose uses your build instead of pulling. During the build you'll see confirmation of the backend patch, among other things:
 

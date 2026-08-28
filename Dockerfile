@@ -6,15 +6,32 @@
 # Ubuntu 22.04: the helper scripts are hard-wired for it (package names like
 # libicu70, self-install of curl/jq/unzip). This stage only produces static
 # binaries, so the distro is not critical here.
-FROM ubuntu:22.04 AS utils
+#
+# The stage runs on the BUILD platform, never emulated: it only downloads
+# prebuilt binaries for the target architecture, and under QEMU this stage is
+# where multi-arch builds fall over (tar failing with "Invalid argument",
+# repeated TLS resets against GitHub). TARGET_MACHINE tells the helper scripts
+# which architecture to fetch for instead of them reading `uname -m`.
+ARG BUILDPLATFORM
+FROM --platform=${BUILDPLATFORM} ubuntu:22.04 AS utils
 ENV DEBIAN_FRONTEND=noninteractive
-ARG TARGETPLATFORM
+ARG TARGETARCH
 WORKDIR /utils
 # Use script due to local build compatibility (arch-aware downloads)
 COPY docker-utils/*.sh ./
 RUN chmod +x *.sh
-RUN sh ./ffmpeg-fetch.sh
-RUN sh ./fetch-twitchdownloader.sh
+RUN case "$TARGETARCH" in \
+        amd64) export TARGET_MACHINE=x86_64 ;; \
+        arm64) export TARGET_MACHINE=aarch64 ;; \
+        *) echo "Unsupported target architecture: $TARGETARCH" && exit 1 ;; \
+    esac && \
+    sh ./ffmpeg-fetch.sh
+RUN case "$TARGETARCH" in \
+        amd64) export TARGET_MACHINE=x86_64 ;; \
+        arm64) export TARGET_MACHINE=aarch64 ;; \
+        *) echo "Unsupported target architecture: $TARGETARCH" && exit 1 ;; \
+    esac && \
+    sh ./fetch-twitchdownloader.sh
 
 # Deno as a JavaScript runtime for yt-dlp. Modern yt-dlp needs a JS runtime for
 # YouTube extraction; without one it prints a warning to stderr — and that very
@@ -24,17 +41,17 @@ RUN sh ./fetch-twitchdownloader.sh
 ARG DENO_VERSION=v2.9.6
 RUN apt-get update && \
     apt-get install -y --no-install-recommends curl ca-certificates unzip && \
-    arch="$(dpkg --print-architecture)" && \
-    case "$arch" in \
+    case "$TARGETARCH" in \
         amd64) deno_arch="x86_64-unknown-linux-gnu" ;; \
         arm64) deno_arch="aarch64-unknown-linux-gnu" ;; \
-        *) echo "Unsupported architecture for Deno: $arch" && exit 1 ;; \
+        *) echo "Unsupported architecture for Deno: $TARGETARCH" && exit 1 ;; \
     esac && \
-    curl -fsSL "https://github.com/denoland/deno/releases/download/${DENO_VERSION}/deno-${deno_arch}.zip" -o /tmp/deno.zip && \
+    curl -fsSL --connect-timeout 10 --max-time 180 --retry 5 --retry-delay 2 --retry-all-errors \
+        "https://github.com/denoland/deno/releases/download/${DENO_VERSION}/deno-${deno_arch}.zip" -o /tmp/deno.zip && \
     unzip /tmp/deno.zip -d /usr/local/bin && \
     chmod +x /usr/local/bin/deno && \
     rm /tmp/deno.zip && \
-    /usr/local/bin/deno --version
+    if [ "$TARGETARCH" = "$(dpkg --print-architecture)" ]; then /usr/local/bin/deno --version; fi
 
 
 ###############################################################################
@@ -110,12 +127,15 @@ RUN usermod -l "$USER" -d "/home/$USER" -m node && \
 
 # Runtime packages: gosu (privilege drop), python3 + pycryptodomex (yt-dlp),
 # atomicparsley (metadata/cover art), tzdata, ffmpeg dependencies.
+# libicu72: TwitchDownloaderCLI is a .NET binary and aborts on startup without
+# an ICU package ("Couldn't find a valid ICU package installed on the system").
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
         gosu \
         tzdata \
         ca-certificates \
         atomicparsley \
+        libicu72 \
         python3-minimal \
         python-is-python3 \
         python3-pip && \
