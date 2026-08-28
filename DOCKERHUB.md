@@ -136,13 +136,7 @@ know about it.
 
 ### Long playlists
 
-No custom arguments are needed. If a subscription's *Custom args* or the global
-field under **Settings → Advanced → Custom args** still contains
-`--extractor-args,,youtubetab:skip=webpage`, remove it: it forces yt-dlp onto
-YouTube's InnerTube API, which YouTube caps after two continuation pages, so
-enumeration stops silently at **200 videos**.
-
-Two settings do matter:
+Two settings decide whether a long playlist is enumerated completely:
 
 - **Cookies.** **Settings → Advanced → use cookies**, with `cookies.txt` in
   `appdata/`. Without it the run is anonymous and YouTube throttles enumeration

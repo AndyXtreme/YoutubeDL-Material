@@ -17,7 +17,7 @@ The original project was built on **Node 16** (end-of-life) and **MongoDB 4**. A
 | Subscription file names | `%(playlist_index)s` → `NA` | **backend patch** injects the real index |
 | Twitch VOD chat | `TwitchDownloaderCLI` aborts (no ICU in the image) | **`libicu72`** installed |
 | Architectures | amd64 | **amd64 + arm64** |
-| Long playlists | capped at 100 videos | documented: cookies + `yt-dlp` as downloader, no custom args |
+| Long playlists | capped at 100 videos | documented: cookies + `yt-dlp` as downloader |
 
 All changes are documented in the [Dockerfile](Dockerfile) and applied **automatically at build time** – the source code itself is not permanently modified (the `playlist_index` patch is applied during the build and aborts the build if the anchor code changes).
 
@@ -110,13 +110,7 @@ YouTube and yt-dlp have a few quirks you should know about. None of them is **a 
 
 ### 1. Long playlists
 
-No custom arguments are needed. If a subscription's **Custom args** or the global
-field under **Settings → Advanced → Custom args** still contains
-`--extractor-args,,youtubetab:skip=webpage`, remove it: it forces yt-dlp onto
-YouTube's InnerTube API, which YouTube caps after two continuation pages, so
-enumeration stops silently at 200 videos.
-
-Two settings do matter:
+Two settings decide whether a long playlist is enumerated completely:
 
 - **Cookies.** Enable **Settings → Advanced → use cookies** and place `cookies.txt` in
   `appdata/`. Without it the run is anonymous and YouTube throttles enumeration much
