@@ -16,10 +16,15 @@ The original project was built on **Node 16** (end-of-life) and **MongoDB 4**. A
 | JS runtime for yt-dlp | missing | **Deno** bundled into the image |
 | Subscription file names | `%(playlist_index)s` → `NA` | **backend patch** injects the real index |
 | Twitch VOD chat | `TwitchDownloaderCLI` aborts (no ICU in the image) | **`libicu72`** installed |
+| Download queue after a restart | every unfinished download is set to *paused* | interrupted downloads **continue on their own** |
+| Memory | finished download processes are never released, the queue is re-read in full every second → out of memory after a few days | **both fixed**, plus a pm2 restart guard |
+| yt-dlp binary | re-downloaded on every single start | **only when a new version actually exists** |
 | Architectures | amd64 | **amd64 + arm64** |
 | Long playlists | capped at 100 videos | documented: cookies + `yt-dlp` as downloader |
 
-All changes are documented in the [Dockerfile](Dockerfile) and applied **automatically at build time** – the source code itself is not permanently modified (the `playlist_index` patch is applied during the build and aborts the build if the anchor code changes).
+All changes are documented in the [Dockerfile](Dockerfile) and applied **automatically at build time** – the source code itself is not permanently modified. Every patch names the exact upstream code it replaces and aborts the build if that code has changed (e.g. after a YTM update).
+
+> Upgrading from an older image? Downloads that the old version left in the *paused* state stay paused – press **Resume all** once on the Downloads page.
 
 ---
 

@@ -33,10 +33,17 @@ Self-hosted, no cloud, no account anywhere. Multi-arch: **amd64 + arm64**.
 | JS runtime for yt-dlp | missing – subscriptions break | **Deno** bundled in |
 | `%(playlist_index)s` in subscriptions | resolves to `NA` | **backend patch** injects the real index |
 | Twitch VOD chat | `TwitchDownloaderCLI` aborts (no ICU in the image) | **`libicu72`** installed |
+| Download queue after a restart | everything unfinished is set to *paused* | interrupted downloads **continue on their own** |
+| Memory | finished download processes are never released, the queue is re-read in full every second → out of memory after days | **both fixed**, plus a pm2 restart guard |
+| yt-dlp binary | re-downloaded on every start | **only when a new version actually exists** |
 | Architectures | amd64 | **amd64 + arm64** |
 
-The patch is applied at build time and aborts the build if the upstream code it
-anchors to changes – the source itself stays unmodified.
+The patches are applied at build time; each one names the exact upstream code it
+replaces and aborts the build if that code has changed – the source itself stays
+unmodified.
+
+> Coming from an older image? Downloads the old version left in the *paused*
+> state stay paused – press **Resume all** once on the Downloads page.
 
 ---
 

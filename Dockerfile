@@ -82,27 +82,103 @@ COPY ["backend/package.json", "backend/package-lock.json", "./"]
 RUN npm install --omit=dev --legacy-peer-deps
 COPY ["backend/", "./"]
 
-# Patch: subscription videos are downloaded individually via their video URL, so
-# yt-dlp has no playlist context and %(playlist_index)s becomes "NA". YTM does
-# know the index from the playlist metadata, so we inject it into the output
-# template before the download. Aborts the build if the anchor code no longer
-# matches (e.g. after a YTM update).
+# Patches against the YTM backend. Each one names the exact upstream code it
+# replaces; if an anchor is gone (e.g. after a YTM update) the build aborts
+# instead of quietly producing an image with a patch missing. The source in the
+# repository stays untouched.
 RUN node - <<'EOF'
 const fs = require('fs');
-const file = 'subscriptions.js';
-let src = fs.readFileSync(file, 'utf8');
-const anchor = "await downloader_api.createDownload(file_to_download['webpage_url'], sub.type || 'video', base_download_options, user_uid, sub.id, sub.name, [file_to_download]);";
-const replacement = [
-  "const download_options = Object.assign({}, base_download_options);",
-  "        if (download_options.customOutput && file_to_download['playlist_index'] != null) {",
-  "            download_options.customOutput = download_options.customOutput.replace(/%\\(playlist_index\\)(\\d*)[sd]/g, (m, w) => String(file_to_download['playlist_index']).padStart(parseInt(w || '0', 10), '0'));",
-  "        }",
-  "        await downloader_api.createDownload(file_to_download['webpage_url'], sub.type || 'video', download_options, user_uid, sub.id, sub.name, [file_to_download]);"
-].join('\n');
-if (!src.includes(anchor)) { console.error('playlist_index patch: anchor not found, aborting'); process.exit(1); }
-src = src.replace(anchor, replacement);
-fs.writeFileSync(file, src);
-console.log('playlist_index patch applied to subscriptions.js successfully');
+
+const patches = [
+{
+    // Subscription videos are downloaded individually via their video URL, so
+    // yt-dlp has no playlist context and %(playlist_index)s becomes "NA". YTM
+    // does know the index from the playlist metadata, so inject it into the
+    // output template before the download starts.
+    name: 'playlist_index in subscription downloads',
+    file: 'subscriptions.js',
+    find: "await downloader_api.createDownload(file_to_download['webpage_url'], sub.type || 'video', base_download_options, user_uid, sub.id, sub.name, [file_to_download]);",
+    replace: [
+        "const download_options = Object.assign({}, base_download_options);",
+        "        if (download_options.customOutput && file_to_download['playlist_index'] != null) {",
+        "            download_options.customOutput = download_options.customOutput.replace(/%\\(playlist_index\\)(\\d*)[sd]/g, (m, w) => String(file_to_download['playlist_index']).padStart(parseInt(w || '0', 10), '0'));",
+        "        }",
+        "        await downloader_api.createDownload(file_to_download['webpage_url'], sub.type || 'video', download_options, user_uid, sub.id, sub.name, [file_to_download]);"
+    ].join('\n')
+},
+{
+    // fixDownloadState() pauses every unfinished download on startup, so after a
+    // crash or a plain restart the queue stays dead until someone presses resume
+    // by hand. Only touch downloads that were actually interrupted...
+    name: 'restart: leave user-paused downloads alone',
+    file: 'downloader.js',
+    find: "const running_downloads = downloads.filter(download => !download['finished'] && !download['error']);",
+    replace: "const running_downloads = downloads.filter(download => !download['finished'] && !download['error'] && !download['paused']);"
+},
+{
+    // ...and let those continue instead of pausing them.
+    name: 'restart: resume interrupted downloads',
+    file: 'downloader.js',
+    find: "const update_obj = {finished_step: true, paused: true, running: false};",
+    replace: "const update_obj = {finished_step: true, paused: false, running: false};"
+},
+{
+    // checkDownloads() runs once per second and pulled the *entire* download
+    // queue out of the database every time, finished downloads included. Nothing
+    // ever prunes that collection, so the poll gets heavier every day.
+    name: 'poll only unfinished downloads',
+    file: 'downloader.js',
+    find: "    if (!should_check_downloads) return;\n\n    const downloads = await db_api.getRecords('download_queue');",
+    replace: "    if (!should_check_downloads) return;\n\n    const downloads = await db_api.getRecords('download_queue', {finished: false});"
+},
+{
+    // The child process of a finished download was never removed from the map.
+    // It is spawned with maxBuffer: Infinity, so every entry pins that
+    // download's complete yt-dlp output in memory until the process dies.
+    name: 'release finished download processes',
+    file: 'downloader.js',
+    find: "        const {parsed_output, err} = await callback;\n        clearInterval(download_checker);",
+    replace: "        const {parsed_output, err} = await callback;\n        delete download_to_child_process[download['uid']];\n        clearInterval(download_checker);"
+},
+{
+    // fs.existsSync() returns a boolean, so indexing it with the fork name is
+    // always undefined: the version file was considered missing on every start
+    // and yt-dlp was re-downloaded each time the container came up.
+    name: 'read the yt-dlp version file correctly',
+    file: 'youtube-dl.js',
+    find: "    let current_app_details_exists = fs.existsSync(CONSTS.DETAILS_BIN_PATH);\n    if (!current_app_details_exists[selected_fork]) {",
+    replace: "    const existing_details = fs.existsSync(CONSTS.DETAILS_BIN_PATH) ? fs.readJSONSync(CONSTS.DETAILS_BIN_PATH, {throws: false}) : null;\n    if (!existing_details || !existing_details[selected_fork]) {"
+},
+{
+    // getLatestUpdateVersion() resolves to null when the GitHub API is
+    // unreachable or rate limited. Overwriting a working binary in that case is
+    // how you end up with a truncated yt-dlp.
+    name: 'keep yt-dlp when the version check fails',
+    file: 'youtube-dl.js',
+    find: "if (!fs.existsSync(output_file_path) || current_fork !== selected_fork || !current_version || current_version !== latest_version) {",
+    replace: "if (!fs.existsSync(output_file_path) || current_fork !== selected_fork || !current_version || (latest_version && current_version !== latest_version)) {"
+},
+{
+    // Safety net: a clean pm2 restart below the V8 heap limit instead of a fatal
+    // "JavaScript heap out of memory" abort in the middle of a download.
+    name: 'pm2 memory guard',
+    file: 'pm2.config.js',
+    find: '      watch  : "placeholder",',
+    replace: '      watch  : "placeholder",\n      max_memory_restart: "3G",'
+}
+];
+
+for (const patch of patches) {
+    // Normalise line endings first: a checkout on Windows has CRLF, while the
+    // multi-line anchors above are written with LF.
+    const src = fs.readFileSync(patch.file, 'utf8').split('\r\n').join('\n');
+    if (!src.includes(patch.find)) {
+        console.error(`patch '${patch.name}': anchor not found in ${patch.file}, aborting`);
+        process.exit(1);
+    }
+    fs.writeFileSync(patch.file, src.replace(patch.find, patch.replace));
+    console.log(`patch applied: ${patch.name} (${patch.file})`);
+}
 EOF
 
 
