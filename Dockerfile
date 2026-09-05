@@ -203,6 +203,45 @@ const patches = [
     file: 'app.js',
     find: "    const sub = subscriptions_api.getSubscription(subID);\n    subscriptions_api.getVideosForSub(sub.id);",
     replace: "    const sub = await subscriptions_api.getSubscription(subID);\n    if (!sub) {\n        res.sendStatus(400);\n        return;\n    }\n    subscriptions_api.getVideosForSub(sub.id);"
+},
+{
+    // A subscription is flagged 'downloading' for the length of its check, and
+    // every later check is skipped while that flag is set. runYoutubeDL()
+    // returns undefined when the binary is missing - destructuring that throws,
+    // the flag is never cleared, and the subscription is silently skipped for
+    // good (until the next restart clears it).
+    name: 'subscription check: never leave the downloading flag set',
+    file: 'subscriptions.js',
+    find: "    let {child_process, callback} = await youtubedl_api.runYoutubeDL(sub.url, downloadConfig);\n    updateSubscriptionProperty(sub, {child_process: child_process}, user_uid);",
+    replace: "    let child_process = null, callback = null;\n    try {\n        ({child_process, callback} = await youtubedl_api.runYoutubeDL(sub.url, downloadConfig) || {});\n    } catch (e) {\n        logger.error(`Subscription: check for ${sub.name} could not be started: ${e}`);\n    }\n    if (!callback) {\n        logger.error(`Subscription: check for ${sub.name} was not started - is the yt-dlp binary in appdata/bin intact?`);\n        updateSubscriptionProperty(sub, {downloading: false, child_process: null}, user_uid);\n        return null;\n    }\n    updateSubscriptionProperty(sub, {child_process: child_process}, user_uid);"
+},
+{
+    // At the default log level a subscription check was completely invisible:
+    // start, result and \"nothing new\" were all on verbose. That leaves \"it just
+    // doesn't download\" with nothing to go on.
+    name: 'log: subscription check start',
+    file: 'subscriptions.js',
+    find: "    logger.verbose(`Subscription: getting list of videos to download for ${sub.name} with args: ${downloadConfig.join(',')}`);",
+    replace: "    logger.info(`Subscription: checking ${sub.name} - for a long playlist this takes several minutes.`);\n    logger.verbose(`Subscription: getting list of videos to download for ${sub.name} with args: ${downloadConfig.join(',')}`);"
+},
+{
+    name: 'log: subscription check result',
+    file: 'subscriptions.js',
+    find: "    logger.verbose('Subscription: finished check for ' + sub.name);\n    const files_to_download = await handleOutputJSON(parsed_output, sub, user_uid);",
+    replace: "    logger.verbose('Subscription: finished check for ' + sub.name);\n    const files_to_download = await handleOutputJSON(parsed_output, sub, user_uid);\n    logger.info(`Subscription: ${sub.name} checked, ${files_to_download.length} new video(s) queued.`);"
+},
+{
+    name: 'log: nothing new for a subscription',
+    file: 'subscriptions.js',
+    find: "        logger.verbose('No additional videos to download for ' + sub.name);",
+    replace: "        logger.info('No additional videos to download for ' + sub.name);"
+},
+{
+    // The only clue that a subscription is stuck on its downloading flag.
+    name: 'log: subscription skipped while checking',
+    file: 'subscriptions.js',
+    find: "        logger.verbose(`Subscription: skipped checking ${sub.name} as it's downloading videos.`);",
+    replace: "        logger.info(`Subscription: skipped checking ${sub.name} as its previous check is still running.`);"
 }
 ];
 
