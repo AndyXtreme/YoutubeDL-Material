@@ -19,6 +19,7 @@ The original project was built on **Node 16** (end-of-life) and **MongoDB 4**. A
 | Download queue after a restart | every unfinished download is set to *paused* | interrupted downloads **continue on their own** |
 | Memory | finished download processes are never released, the queue is re-read in full every second → out of memory after a few days | **both fixed**, plus a pm2 restart guard |
 | yt-dlp binary | re-downloaded on every single start | **only when a new version actually exists** |
+| Deleting a subscription | the request never answers, a `TypeError` per second in the log | **answered cleanly**, log stays quiet |
 | Architectures | amd64 | **amd64 + arm64** |
 | Long playlists | capped at 100 videos | documented: cookies + `yt-dlp` as downloader |
 
@@ -72,10 +73,12 @@ docker build --platform linux/amd64,linux/arm64 -t <user>/youtubedl-material:lat
 
 The helper stage that fetches ffmpeg and TwitchDownloaderCLI runs unemulated on the build host and downloads binaries for the target architecture, so the arm64 build doesn't depend on QEMU behaving.
 
-Since the image then already exists locally, Compose uses your build instead of pulling. During the build you'll see confirmation of the backend patch, among other things:
+Since the image then already exists locally, Compose uses your build instead of pulling. During the build every patch reports itself:
 
 ```
-playlist_index patch applied to subscriptions.js successfully
+patch applied: playlist_index in subscription downloads (subscriptions.js)
+patch applied: restart: resume interrupted downloads (downloader.js)
+...
 ```
 
 ---

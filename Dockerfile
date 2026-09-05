@@ -165,6 +165,44 @@ const patches = [
     file: 'pm2.config.js',
     find: '      watch  : "placeholder",',
     replace: '      watch  : "placeholder",\n      max_memory_restart: "3G",'
+},
+{
+    // getRecord() returns null for a subscription that no longer exists, and
+    // JSON.parse(JSON.stringify(null)) is null too - so reading 'downloading'
+    // off it threw. The UI keeps polling a subscription for a moment after it
+    // was deleted, which produced a TypeError per second in the log.
+    name: 'getSubscription: handle a deleted subscription',
+    file: 'subscriptions.js',
+    find: "exports.getSubscription = async (subID) => {\n    // stringify and parse because we may override the 'downloading' property\n    const sub = JSON.parse(JSON.stringify(await db_api.getRecord('subscriptions', {id: subID})));",
+    replace: "exports.getSubscription = async (subID) => {\n    const sub_record = await db_api.getRecord('subscriptions', {id: subID});\n    // a missing subscription is not an error - every caller below handles null\n    if (!sub_record) return null;\n    // stringify and parse because we may override the 'downloading' property\n    const sub = JSON.parse(JSON.stringify(sub_record));"
+},
+{
+    // A subscription can be deleted between listing the ones to check and the
+    // check itself.
+    name: 'checkSubscription: tolerate a missing subscription',
+    file: 'subscriptions.js',
+    find: "async function checkSubscription(sub_id) {\n    let sub = await exports.getSubscription(sub_id);\n",
+    replace: "async function checkSubscription(sub_id) {\n    let sub = await exports.getSubscription(sub_id);\n    if (!sub) return;\n"
+},
+{
+    name: 'cancelCheckSubscription: tolerate a missing subscription',
+    file: 'subscriptions.js',
+    find: "    const sub = await exports.getSubscription(sub_id);\n    if (!sub['downloading'] && !sub['child_process']) {",
+    replace: "    const sub = await exports.getSubscription(sub_id);\n    if (!sub || (!sub['downloading'] && !sub['child_process'])) {"
+},
+{
+    name: 'unsubscribe: tolerate a missing subscription',
+    file: 'subscriptions.js',
+    find: "exports.unsubscribe = async (sub_id, deleteMode, user_uid = null) => {\n    const sub = await exports.getSubscription(sub_id);\n",
+    replace: "exports.unsubscribe = async (sub_id, deleteMode, user_uid = null) => {\n    const sub = await exports.getSubscription(sub_id);\n    if (!sub) return;\n"
+},
+{
+    // Missing await: sub was a Promise, so sub.id was undefined and the endpoint
+    // never downloaded anything.
+    name: 'downloadVideosForSubscription: await the lookup',
+    file: 'app.js',
+    find: "    const sub = subscriptions_api.getSubscription(subID);\n    subscriptions_api.getVideosForSub(sub.id);",
+    replace: "    const sub = await subscriptions_api.getSubscription(subID);\n    if (!sub) {\n        res.sendStatus(400);\n        return;\n    }\n    subscriptions_api.getVideosForSub(sub.id);"
 }
 ];
 

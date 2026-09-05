@@ -36,6 +36,7 @@ Self-hosted, no cloud, no account anywhere. Multi-arch: **amd64 + arm64**.
 | Download queue after a restart | everything unfinished is set to *paused* | interrupted downloads **continue on their own** |
 | Memory | finished download processes are never released, the queue is re-read in full every second → out of memory after days | **both fixed**, plus a pm2 restart guard |
 | yt-dlp binary | re-downloaded on every start | **only when a new version actually exists** |
+| Deleting a subscription | the request never answers, a `TypeError` per second in the log | **answered cleanly**, log stays quiet |
 | Architectures | amd64 | **amd64 + arm64** |
 
 The patches are applied at build time; each one names the exact upstream code it
@@ -212,6 +213,7 @@ download, and what you do with it, is your responsibility.
 | Tag | |
 |---|---|
 | `latest` | current state |
+| `1.2` | fixed version – subscription deletion fixes |
 | `1.1` | fixed version – download queue and memory fixes |
 | `1.0` | fixed version – first release |
 
