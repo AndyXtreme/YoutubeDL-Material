@@ -212,7 +212,8 @@ download, and what you do with it, is your responsibility.
 | Tag | |
 |---|---|
 | `latest` | current state |
-| `1.0` | fixed version |
+| `1.1` | fixed version – download queue and memory fixes |
+| `1.0` | fixed version – first release |
 
 Full documentation – build details, the patch itself, volumes and every one of
 the playlist caveats – lives as `README.md` in the source repository:
