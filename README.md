@@ -20,6 +20,7 @@ The original project was built on **Node 16** (end-of-life) and **MongoDB 4**. A
 | Memory | finished download processes are never released, the queue is re-read in full every second → out of memory after a few days | **both fixed**, plus a pm2 restart guard |
 | yt-dlp binary | re-downloaded on every single start | **only when a new version actually exists** |
 | Deleting a subscription | the request never answers, a `TypeError` per second in the log | **answered cleanly**, log stays quiet |
+| Subscription checks | invisible at the default log level, and a failed check can block the subscription for good | **logged**, and the blocking flag is always cleared |
 | Architectures | amd64 | **amd64 + arm64** |
 | Long playlists | capped at 100 videos | documented: cookies + `yt-dlp` as downloader |
 
