@@ -81,15 +81,23 @@ async function siblingFiles(file_path) {
     return entries.filter(entry => entry === stem || entry.startsWith(stem + '.'));
 }
 
+// Every refusal goes into the log as well. The caller shows it, but a message
+// on screen is gone the moment it is dismissed, and "it just said something and
+// disappeared" is not something anyone can act on.
+function refuse(name, result) {
+    logger.info(`Renumber: ${name} - nothing was renamed. ${result.error}`);
+    return Object.assign({success: false}, result);
+}
+
 exports.renumberSubscription = async (sub_id, {dry_run = true, force = false} = {}) => {
     const sub = await subscriptions().getSubscription(sub_id);
-    if (!sub) return {success: false, error: `No subscription with id ${sub_id}.`};
+    if (!sub) return refuse(sub_id, {error: `No subscription with id ${sub_id}.`});
 
     const files = await db_api.getRecords('files', {sub_id: sub.id});
-    if (!files || files.length === 0) return {success: false, error: `Subscription ${sub.name} has no files in the database.`};
+    if (!files || files.length === 0) return refuse(sub.name, {error: `Subscription ${sub.name} has no files in the database.`});
 
     const {order, advertised} = await getCurrentPlaylistOrder(sub);
-    if (order.size === 0) return {success: false, error: `The playlist of ${sub.name} returned no entries - nothing was touched.`};
+    if (order.size === 0) return refuse(sub.name, {error: `The playlist of ${sub.name} returned no entries - nothing was touched.`});
 
     // The playlist says how long it is; if the enumeration came back shorter,
     // YouTube cut it off and its order is not the real order. Renaming on that
@@ -97,13 +105,12 @@ exports.renumberSubscription = async (sub_id, {dry_run = true, force = false} = 
     // the answer, and put it back on the next run - names flapping back and
     // forth across the whole library.
     if (!force && advertised != null && order.size < advertised) {
-        return {
-            success: false,
+        return refuse(sub.name, {
             error: `The playlist claims ${advertised} entries but only ${order.size} came back, so it was read `
                  + `incompletely - probably throttling, or cookies that no longer work. Nothing was changed. `
                  + `Use "force": true to renumber on a partial list anyway.`,
             incomplete: true, playlist_entries: order.size, playlist_claims: advertised,
-        };
+        });
     }
 
     // Padding and separator: follow what the existing files use.
@@ -147,13 +154,12 @@ exports.renumberSubscription = async (sub_id, {dry_run = true, force = false} = 
     // strip the numbering off the whole library. Refuse that unless it is asked
     // for explicitly.
     if (gone > kept && !force) {
-        return {
-            success: false,
+        return refuse(sub.name, {
             error: `${gone} of ${files.length} files are not in the playlist any more, more than are still in it. `
                  + `That usually means the playlist was only read partially (throttling, or cookies that no longer work) `
                  + `rather than emptied. Nothing was changed. Re-run with "force": true if the playlist really did shrink that much.`,
             kept, gone, playlist_entries: order.size,
-        };
+        });
     }
 
     // Two files ending up on the same name: stop and say which, instead of
@@ -175,12 +181,11 @@ exports.renumberSubscription = async (sub_id, {dry_run = true, force = false} = 
         }
     }
     if (collisions.length > 0) {
-        return {
-            success: false,
+        return refuse(sub.name, {
             error: `${collisions.length} name collision(s) - nothing was changed. Add [%(id)s] to the file output template `
                  + `so identical titles cannot collide.`,
             collisions,
-        };
+        });
     }
 
     const summary = {
@@ -229,7 +234,7 @@ exports.renumberSubscription = async (sub_id, {dry_run = true, force = false} = 
                 logger.error(`Renumber: could not put ${entry.to_stage} back: ${rollback_error}`);
             }
         }
-        return {success: false, error: `Renaming could not be started (${e}) - every file was put back.`};
+        return refuse(sub.name, {error: `Renaming could not be started (${e}) - every file was put back.`});
     }
 
     // Phase 2: into the new names. A file that cannot be moved goes back to the

@@ -96,6 +96,27 @@ const patches = [
     replace: "      <span style=\"white-space: pre-line;\">{{dialogText}}</span>"
 },
 {
+    // So the same dialog can carry a plain message with a single button.
+    // openSnackBar() is hard-wired to two seconds, which is not enough to read
+    // a sentence explaining why something was refused.
+    name: 'dialog: optional single button',
+    file: 'src/app/dialogs/confirm-dialog/confirm-dialog.component.ts',
+    find: "  submitClicked = false;\n  closeOnSubmit = true;",
+    replace: "  submitClicked = false;\n  closeOnSubmit = true;\n  hideCancel = false;"
+},
+{
+    name: 'dialog: read the single-button flag',
+    file: 'src/app/dialogs/confirm-dialog/confirm-dialog.component.ts',
+    find: "    if (this.data.closeOnSubmit   !== undefined) { this.closeOnSubmit   = this.data.closeOnSubmit }",
+    replace: "    if (this.data.closeOnSubmit   !== undefined) { this.closeOnSubmit   = this.data.closeOnSubmit }\n    if (this.data.hideCancel      !== undefined) { this.hideCancel      = this.data.hideCancel }"
+},
+{
+    name: 'dialog: hide the cancel button when asked',
+    file: 'src/app/dialogs/confirm-dialog/confirm-dialog.component.html',
+    find: "  <button style=\"float: right;\" mat-stroked-button mat-dialog-close>",
+    replace: "  <button *ngIf=\"!hideCancel\" style=\"float: right;\" mat-stroked-button mat-dialog-close>"
+},
+{
     name: 'subscription page: import the confirm dialog',
     file: 'src/app/subscription/subscription/subscription.component.ts',
     find: "import { EditSubscriptionDialogComponent } from 'app/dialogs/edit-subscription-dialog/edit-subscription-dialog.component';",
@@ -118,7 +139,7 @@ const patches = [
         "    this.postsService.renumberSubscription(this.subscription.id, true).subscribe(res => {",
         "      this.renumber_clicked = false;",
         "      if (!res['success']) {",
-        "        this.postsService.openSnackBar(res['error'] || 'Renumbering failed!');",
+        "        this.showRenumberMessage($localize`Nothing was renamed`, res['error'] || 'Renumbering failed.');",
         "        return;",
         "      }",
         "      if (!res['renames']) {",
@@ -137,17 +158,30 @@ const patches = [
         "      }).afterClosed().subscribe(confirmed => {",
         "        if (!confirmed) { return; }",
         "        this.postsService.renumberSubscription(this.subscription.id, false).subscribe(done => {",
-        "          this.postsService.openSnackBar(done['success'] ? done['renames'] + ' file(s) renumbered.' : (done['error'] || 'Renumbering failed!'));",
+        "          if (done['success']) {",
+        "            this.postsService.openSnackBar(done['renames'] + ' file(s) renumbered.');",
+        "          } else {",
+        "            this.showRenumberMessage($localize`Nothing was renamed`, done['error'] || 'Renumbering failed.');",
+        "          }",
         "          this.postsService.files_changed.next(true);",
         "        }, err => {",
         "          console.error(err);",
-        "          this.postsService.openSnackBar('Renumbering failed!');",
+        "          this.showRenumberMessage($localize`Renumbering failed`, String(err && err.message || err));",
         "        });",
         "      });",
         "    }, err => {",
         "      console.error(err);",
         "      this.renumber_clicked = false;",
-        "      this.postsService.openSnackBar('Renumbering failed!');",
+        "      this.showRenumberMessage($localize`Renumbering failed`, String(err && err.message || err));",
+        "    });",
+        "  }",
+        "",
+        "  // A refusal is a sentence or two explaining what to do about it, and",
+        "  // openSnackBar() clears itself after two seconds. It belongs in",
+        "  // something the reader closes themselves.",
+        "  showRenumberMessage(title: string, text: string): void {",
+        "    this.dialog.open(ConfirmDialogComponent, {",
+        "      data: {dialogTitle: title, dialogText: text, submitText: 'OK', hideCancel: true}",
         "    });",
         "  }",
         "",
