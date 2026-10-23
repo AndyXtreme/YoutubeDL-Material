@@ -240,6 +240,7 @@ download, and what you do with it, is your responsibility.
 | Tag | |
 |---|---|
 | `latest` | current state |
+| `1.3` | fixed version – playlists, renumbering, cookies |
 | `1.2` | fixed version – subscription fixes |
 | `1.1` | fixed version – download queue and memory fixes |
 | `1.0` | fixed version – first release |
