@@ -81,6 +81,9 @@ COPY ["backend/package.json", "backend/package-lock.json", "./"]
 # npm install instead of npm ci, because the backend lockfile may be outdated too.
 RUN npm install --omit=dev --legacy-peer-deps
 COPY ["backend/", "./"]
+# Additions of this edition that are whole files rather than patches, so they
+# have no upstream anchor that could drift.
+COPY ["docker-extras/", "./"]
 
 # Patches against the YTM backend. Each one names the exact upstream code it
 # replaces; if an anchor is gone (e.g. after a YTM update) the build aborts
@@ -242,6 +245,122 @@ const patches = [
     file: 'subscriptions.js',
     find: "        logger.verbose(`Subscription: skipped checking ${sub.name} as it's downloading videos.`);",
     replace: "        logger.info(`Subscription: skipped checking ${sub.name} as its previous check is still running.`);"
+},
+{
+    // yt-dlp exits non-zero as soon as a single entry of a playlist fails - a
+    // deleted, private or geo-blocked video. -i only keeps it going, it does
+    // not change the exit code, and execa turns a non-zero exit into a
+    // rejection. This catch threw away e.stdout, which holds the JSON of every
+    // video that *did* work: one dead video in a playlist and the whole
+    // subscription check reports "failed", so nothing from that playlist is
+    // ever downloaded.
+    name: 'salvage the output when yt-dlp exits with an error',
+    file: 'youtube-dl.js',
+    find: "        } catch (e) {\n            resolve({parsed_output: null, err: e})\n        }",
+    replace: [
+        "        } catch (e) {",
+        "            const salvaged = e && typeof e.stdout === 'string' ? e.stdout.trim() : '';",
+        "            const parsed_output = salvaged ? utils.parseOutputJSON(salvaged.split(/\\r?\\n/), null) : null;",
+        "            if (parsed_output) logger.warn(`${youtubedl_fork} reported an error but returned ${parsed_output.length} usable entry/entries - continuing with those. Unavailable videos inside a playlist are the usual cause.`);",
+        "            resolve({parsed_output, err: e})",
+        "        }"
+    ].join('\n')
+},
+{
+    // A single unreadable line killed the whole batch: indexOf('{"') returns -1
+    // for a line that is not JSON, and slice(-1) then reduces it to its last
+    // character - which JSON.parse rejects, taking every good entry with it.
+    name: 'skip non-JSON lines in the downloader output',
+    file: 'utils.js',
+    find: "        for (const output_item of output) {\n            // we have to do this because sometimes there will be leading characters before the actual json\n            const start_idx = output_item.indexOf('{\"');\n            const clean_output = output_item.slice(start_idx, output_item.length);\n            split_output.push(clean_output);\n        }",
+    replace: [
+        "        for (const output_item of output) {",
+        "            // we have to do this because sometimes there will be leading characters before the actual json",
+        "            const start_idx = output_item.indexOf('{\"');",
+        "            if (start_idx === -1) continue;",
+        "            split_output.push(output_item.slice(start_idx, output_item.length));",
+        "        }"
+    ].join('\n')
+},
+{
+    // ...and parse what is left entry by entry, so one broken record no longer
+    // discards the other 227.
+    name: 'parse the downloader output entry by entry',
+    file: 'utils.js',
+    find: "    try {\n        return split_output.map(split_output_str => JSON.parse(split_output_str));\n    } catch(e) {\n        return null;\n    }",
+    replace: [
+        "    const parsed_output = [];",
+        "    for (const split_output_str of split_output) {",
+        "        try {",
+        "            parsed_output.push(JSON.parse(split_output_str));",
+        "        } catch (e) {",
+        "            logger.warn('Skipping one unreadable entry in the downloader output.');",
+        "        }",
+        "    }",
+        "    return parsed_output.length > 0 ? parsed_output : null;"
+    ].join('\n')
+},
+{
+    // Wire up the files this edition adds of its own.
+    name: 'require the renumber and cookie helpers',
+    file: 'app.js',
+    find: "const subscriptions_api = require('./subscriptions');",
+    replace: "const subscriptions_api = require('./subscriptions');\nconst renumber_api = require('./renumber');\nconst cookies_api = require('./cookies');"
+},
+{
+    // Every yt-dlp run gets its own copy of the cookie jar instead of all of
+    // them sharing appdata/cookies.txt - see cookies.js for why that one shared
+    // file was killing the session. Both call sites in subscriptions.js are
+    // byte for byte identical, hence 'all'.
+    name: 'cookies: private jar per subscription run',
+    file: 'subscriptions.js',
+    all: true,
+    find: "    if (useCookies) {\n        if (await fs.pathExists(path.join(__dirname, 'appdata', 'cookies.txt'))) {\n            downloadConfig.push('--cookies', path.join('appdata', 'cookies.txt'));\n        } else {\n            logger.warn('Cookies file could not be found. You can either upload one, or disable \\'use cookies\\' in the Advanced tab in the settings.');\n        }\n    }",
+    replace: "    if (useCookies) {\n        downloadConfig.push(...await cookies_api.cookieArgs('sub'));\n    }"
+},
+{
+    name: 'cookies: private jar per download',
+    file: 'downloader.js',
+    find: "        if (useCookies) {\n            if (await fs.pathExists(path.join(__dirname, 'appdata', 'cookies.txt'))) {\n                downloadConfig.push('--cookies', path.join('appdata', 'cookies.txt'));\n            } else {\n                logger.warn('Cookies file could not be found. You can either upload one, or disable \\'use cookies\\' in the Advanced tab in the settings.');\n            }\n        }",
+    replace: "        if (useCookies) {\n            downloadConfig.push(...await cookies_api.cookieArgs('download'));\n        }"
+},
+{
+    name: 'cookies: require the helper in subscriptions.js',
+    file: 'subscriptions.js',
+    find: "const archive_api = require('./archive');",
+    replace: "const archive_api = require('./archive');\nconst cookies_api = require('./cookies');"
+},
+{
+    name: 'cookies: require the helper in downloader.js',
+    file: 'downloader.js',
+    find: "const archive_api = require('./archive');",
+    replace: "const archive_api = require('./archive');\nconst cookies_api = require('./cookies');"
+},
+{
+    // The one serialized writer that keeps the master jar fresh.
+    name: 'cookies: start the keeper',
+    file: 'app.js',
+    find: "        subscriptions_api.watchSubscriptionsInterval();\n    }",
+    replace: "        subscriptions_api.watchSubscriptionsInterval();\n    }\n\n    cookies_api.start();"
+},
+{
+    // Renumber a subscription folder against the playlist as it is now. Default
+    // is a dry run: it answers with the list of renames it would make.
+    name: 'endpoint: renumberSubscription',
+    file: 'app.js',
+    find: "app.post('/api/updateSubscription', optionalJwt, async (req, res) => {",
+    replace: [
+        "app.post('/api/renumberSubscription', optionalJwt, async (req, res) => {",
+        "    try {",
+        "        res.send(await renumber_api.renumberSubscription(req.body.sub_id, {dry_run: req.body.dry_run !== false, force: req.body.force === true}));",
+        "    } catch (e) {",
+        "        logger.error(`Renumber: ${e}`);",
+        "        res.send({success: false, error: String((e && e.message) || e)});",
+        "    }",
+        "});",
+        "",
+        "app.post('/api/updateSubscription', optionalJwt, async (req, res) => {"
+    ].join('\n')
 }
 ];
 
@@ -253,8 +372,11 @@ for (const patch of patches) {
         console.error(`patch '${patch.name}': anchor not found in ${patch.file}, aborting`);
         process.exit(1);
     }
-    fs.writeFileSync(patch.file, src.replace(patch.find, patch.replace));
-    console.log(`patch applied: ${patch.name} (${patch.file})`);
+    // split/join rather than replaceAll: it takes the replacement literally, so
+    // a '$' in the new code cannot turn into a substitution pattern.
+    const count = patch.all ? src.split(patch.find).length - 1 : 1;
+    fs.writeFileSync(patch.file, patch.all ? src.split(patch.find).join(patch.replace) : src.replace(patch.find, patch.replace));
+    console.log(`patch applied: ${patch.name} (${patch.file}${patch.all ? `, ${count}x` : ''})`);
 }
 EOF
 

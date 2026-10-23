@@ -38,6 +38,9 @@ Self-hosted, no cloud, no account anywhere. Multi-arch: **amd64 + arm64**.
 | yt-dlp binary | re-downloaded on every start | **only when a new version actually exists** |
 | Deleting a subscription | the request never answers, a `TypeError` per second in the log | **answered cleanly**, log stays quiet |
 | Subscription checks | invisible at the default log level, and a failed check can block the subscription for good | **logged**, and the blocking flag is always cleared |
+| A playlist containing a deleted or private video | one unavailable entry makes yt-dlp exit non-zero, the whole check counts as failed, and **nothing** from that playlist is downloaded | the videos that did come back are **used** |
+| Cookies | every concurrent download shares one `cookies.txt` and writes it back, so stale cookies overwrite fresh ones and the session dies | each run gets **its own copy**, one keeper refreshes the master jar |
+| Numbering after a video leaves a playlist | files keep the number they were downloaded with, for good | an endpoint **re-derives** the numbers from the playlist as it is now |
 | Architectures | amd64 | **amd64 + arm64** |
 
 The patches are applied at build time; each one names the exact upstream code it
@@ -183,6 +186,29 @@ the already-fetched playlist metadata before the download starts.
 Not in real time. New videos appear at the next check
 (**Settings → Subscriptions → Check interval**, in seconds) – or right away if
 you refresh the subscription by hand in the UI.
+
+### Videos removed from a playlist
+
+A video that is **deleted or private but still listed** makes yt-dlp exit with
+an error, which upstream treats as a failed check – one dead entry and the whole
+playlist stops downloading. This image uses the entries that did come back.
+
+A video **taken out of the playlist** shifts every position behind it, while the
+files on disk keep the number they were downloaded with. `renumberSubscription`
+re-derives the numbering from the playlist as it is now; files whose video is
+gone lose their number. It is a dry run unless asked otherwise, and refuses to
+act on name collisions or on a playlist that looks only partially read. See the
+README for the call.
+
+### Cookies
+
+There is no username/password login to set up: yt-dlp refuses password login for
+YouTube, so a cookie jar is the only durable authentication. Upstream hands the
+same `cookies.txt` to every concurrent download and each one writes it back on
+exit, so stale cookies overwrite fresh ones and the session dies after a while.
+Here each run works on its own copy and a single keeper refreshes the master jar
+every 30 minutes, reporting in the log when YouTube stops accepting it. Export
+the jar from a private window you close *without* logging out.
 
 ---
 

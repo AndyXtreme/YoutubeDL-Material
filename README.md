@@ -21,6 +21,9 @@ The original project was built on **Node 16** (end-of-life) and **MongoDB 4**. A
 | yt-dlp binary | re-downloaded on every single start | **only when a new version actually exists** |
 | Deleting a subscription | the request never answers, a `TypeError` per second in the log | **answered cleanly**, log stays quiet |
 | Subscription checks | invisible at the default log level, and a failed check can block the subscription for good | **logged**, and the blocking flag is always cleared |
+| A playlist containing a deleted or private video | one unavailable entry makes yt-dlp exit non-zero, the entire check counts as failed, and **nothing** from that playlist is ever downloaded | the videos that did come back are **used**, the dead entry is skipped and named in the log |
+| Cookies | every concurrent download is handed the same `cookies.txt` and writes it back on exit, so a slow process overwrites fresh cookies with its stale ones and the session dies | each run works on **its own copy**, and a single keeper refreshes the master jar |
+| Numbering after a video leaves a playlist | files keep the position they were downloaded with, so the numbering drifts out of step for good | `renumberSubscription` **re-derives** the numbers from the playlist as it is now |
 | Architectures | amd64 | **amd64 + arm64** |
 | Long playlists | capped at 100 videos | documented: cookies + `yt-dlp` as downloader |
 
@@ -161,6 +164,74 @@ Note: YTM automatically creates a folder per playlist for subscriptions (`subscr
 ### 3. Subscription interval
 
 Subscriptions are **not** checked in real time, but on a fixed interval (Settings → Subscriptions → *Check interval*, in seconds). New videos appear only at the next check; alternatively, refresh the subscription manually in the UI.
+
+### 4. Videos removed from a playlist
+
+Two separate things happen when a video disappears from a playlist, and this edition handles them differently.
+
+**A video that is deleted or set to private but still sits in the playlist** makes yt-dlp
+exit with code 1 — `-i` keeps it going but does not change the exit code. Upstream treats
+that as a failed check and discards the output for *every* video in the playlist, so a
+single dead entry stops the whole playlist from downloading, with nothing in the log at
+the default level. This edition uses the entries that did come back:
+
+```
+WARN: yt-dlp reported an error but returned 257 usable entry/entries - continuing with those.
+INFO: Subscription: RenumberTest checked, 257 new video(s) queued.
+```
+
+**A video taken out of the playlist** shifts the position of every video behind it, while
+the files already on disk keep the number they were downloaded with. Nothing breaks, but
+the numbering no longer matches the playlist. To bring it back in line:
+
+```bash
+curl -s -X POST "http://<HOST-IP>:17442/api/renumberSubscription?apiKey=<YOUR-API-KEY>" \
+  -H "Content-Type: application/json" -d '{"sub_id":"<SUB-ID>"}'
+```
+
+That is a **dry run**: it answers with the renames it would make and touches nothing. Add
+`"dry_run": false` to carry them out. Files whose video is still in the playlist get its
+current position, files whose video is gone lose the number altogether, and the database
+follows the rename along with the `.info.json` and the thumbnail.
+
+It refuses to run in two situations, and changes nothing when it does: if two files would
+end up with the same name (add `[%(id)s]` to the output template), and if more files are
+missing from the playlist than are still in it — which is what a playlist that was only
+read *partially* looks like, and stripping the numbering off a whole library because
+YouTube throttled the enumeration is not a trade worth making. `"force": true` overrides
+the second one.
+
+The API key is in **Settings → Advanced → API key** (enable the public API first).
+`sub_id` is the id in the URL of the subscription's page in the web UI.
+
+### 5. Cookies stay valid on their own
+
+YouTube has no username/password login to offer here: yt-dlp refuses it outright
+(*"Login with password is not supported for YouTube"*), because Google's sign-in is a
+JavaScript flow with bot detection and device verification. A cookie jar is the only
+durable form of authentication — so the job is to keep the jar from dying.
+
+yt-dlp writes the rotated cookies back into the file it was given when it exits. Upstream
+hands the *same* `appdata/cookies.txt` to every concurrent download, so with five parallel
+downloads five processes load one jar and write it back in whatever order they finish: a
+process that started twenty minutes earlier overwrites the fresh cookies with its stale
+ones, and the session is gone. yt-dlp's own FAQ warns against sharing one cookie file
+between instances for exactly this reason.
+
+In this edition every run works on its own copy under `appdata/cookie-copies/`, which it
+may write to as it likes and which is then swept up, and one keeper run refreshes the
+master jar every 30 minutes — the only writer there is. If YouTube stops accepting the
+jar, that shows up in the log instead of as downloads that quietly fail:
+
+```
+WARN: Cookies: the refresh request was rejected, which usually means the stored cookies
+      no longer work - upload a fresh cookies.txt.
+```
+
+Upload a jar once (Settings → Advanced → use cookies, `cookies.txt` in `appdata/`), export
+it from a **private/incognito window** that you close *without* logging out — a jar from a
+window you later log out of is invalidated at the source, and no amount of refreshing
+brings it back.
 
 ---
 

@@ -1,0 +1,242 @@
+// Renumber a subscription folder after videos were removed from the playlist.
+//
+// A file output template with %(playlist_index)s bakes the playlist position
+// into the file name. Remove one video from the playlist upstream and every
+// position behind it shifts by one, while the files on disk keep the numbers
+// they were downloaded with. This re-derives the numbers from the playlist as
+// it is now: a file whose video is still in the playlist gets its current
+// position, a file whose video is gone loses its number altogether.
+//
+// Not part of upstream YTM - this file is added by the Dockerfile of this
+// edition, so it has no upstream anchor that could drift.
+
+const fs = require('fs-extra');
+const path = require('path');
+
+const config_api = require('./config');
+const db_api = require('./db');
+const subscriptions_api = require('./subscriptions');
+const youtubedl_api = require('./youtube-dl');
+const utils = require('./utils');
+const logger = require('./logger');
+
+// "007 - Title [id].mp4", "7. Title.mp4", "07_Title.mp4": separator and padding
+// are whatever the output template produced, so read them off the files that
+// are already there instead of assuming one form.
+const PREFIX = /^(\d{1,5})(\s*[-_.)\]]\s*|\s+)/;
+
+function splitPrefix(stem) {
+    const match = stem.match(PREFIX);
+    if (!match) return {width: 0, separator: null, rest: stem};
+    return {width: match[1].length, separator: match[2], rest: stem.slice(match[0].length)};
+}
+
+function mostCommon(counts, fallback) {
+    const entries = Object.entries(counts);
+    if (entries.length === 0) return fallback;
+    return entries.sort((a, b) => b[1] - a[1])[0][0];
+}
+
+// The playlist as it is right now: video id -> current position.
+async function getCurrentPlaylistOrder(sub) {
+    const args = ['--flat-playlist', '--dump-json'];
+    const use_cookies = config_api.getConfigItem('ytdl_use_cookies');
+    if (use_cookies) {
+        if (await fs.pathExists(path.join(__dirname, 'appdata', 'cookies.txt'))) {
+            args.push('--cookies', path.join('appdata', 'cookies.txt'));
+        } else {
+            logger.warn('Renumber: cookies are enabled but appdata/cookies.txt is missing - the playlist may be enumerated incompletely.');
+        }
+    }
+
+    const {callback} = await youtubedl_api.runYoutubeDL(sub.url, args) || {};
+    if (!callback) throw new Error('the downloader could not be started - check appdata/bin');
+
+    const {parsed_output, err} = await callback;
+    if (!parsed_output) throw new Error(`the playlist could not be read: ${(err && (err.stderr || err.message)) || err}`);
+
+    const order = new Map();
+    parsed_output.forEach((entry, i) => {
+        if (!entry || !entry['id']) return;
+        order.set(entry['id'], entry['playlist_index'] != null ? entry['playlist_index'] : i + 1);
+    });
+    return order;
+}
+
+// Every file that belongs to one download: the media file plus the sidecars
+// yt-dlp wrote next to it (.info.json, thumbnail, subtitles, description).
+async function siblingFiles(file_path) {
+    const dir = path.dirname(file_path);
+    const stem = path.parse(file_path).name;
+    const entries = await fs.readdir(dir);
+    return entries.filter(entry => entry === stem || entry.startsWith(stem + '.'));
+}
+
+exports.renumberSubscription = async (sub_id, {dry_run = true, force = false} = {}) => {
+    const sub = await subscriptions_api.getSubscription(sub_id);
+    if (!sub) return {success: false, error: `No subscription with id ${sub_id}.`};
+
+    const files = await db_api.getRecords('files', {sub_id: sub.id});
+    if (!files || files.length === 0) return {success: false, error: `Subscription ${sub.name} has no files in the database.`};
+
+    const order = await getCurrentPlaylistOrder(sub);
+    if (order.size === 0) return {success: false, error: `The playlist of ${sub.name} returned no entries - nothing was touched.`};
+
+    // Padding and separator: follow what the existing files use.
+    const widths = {}, separators = {};
+    for (const file of files) {
+        const {width, separator} = splitPrefix(path.parse(file['path']).name);
+        if (!width) continue;
+        widths[width] = (widths[width] || 0) + 1;
+        separators[separator] = (separators[separator] || 0) + 1;
+    }
+    const highest = Math.max(...order.values());
+    const width = Math.max(parseInt(mostCommon(widths, '3'), 10), String(highest).length);
+    const separator = mostCommon(separators, ' - ');
+
+    // Build the plan before touching anything.
+    const plan = [];
+    let kept = 0, gone = 0;
+    for (const file of files) {
+        const parsed = path.parse(file['path']);
+        const {rest} = splitPrefix(parsed.name);
+        const position = order.get(file['id']);
+        if (position != null) kept++; else gone++;
+        const new_stem = position != null
+            ? String(position).padStart(width, '0') + separator + rest
+            : rest;
+        if (new_stem === parsed.name) continue;
+        plan.push({
+            uid: file['uid'],
+            dir: parsed.dir,
+            old_stem: parsed.name,
+            new_stem: new_stem,
+            old_path: file['path'],
+            new_path: path.join(parsed.dir, new_stem + parsed.ext),
+            in_playlist: position != null,
+            position: position != null ? position : null,
+        });
+    }
+
+    // A truncated enumeration - throttled by YouTube, or cookies gone stale -
+    // looks exactly like "everything was removed from the playlist", and would
+    // strip the numbering off the whole library. Refuse that unless it is asked
+    // for explicitly.
+    if (gone > kept && !force) {
+        return {
+            success: false,
+            error: `${gone} of ${files.length} files are not in the playlist any more, more than are still in it. `
+                 + `That usually means the playlist was only read partially (throttling, or cookies that no longer work) `
+                 + `rather than emptied. Nothing was changed. Re-run with "force": true if the playlist really did shrink that much.`,
+            kept, gone, playlist_entries: order.size,
+        };
+    }
+
+    // Two files ending up on the same name: stop and say which, instead of
+    // overwriting one of them. Happens when the template has no [%(id)s] and
+    // two videos share a title. A target that is already held by a file this
+    // run does not move counts just the same.
+    const moving = new Set(plan.map(item => item.old_path));
+    const targets = new Map();
+    const collisions = [];
+    for (const item of plan) {
+        const existing = targets.get(item.new_path);
+        if (existing) {
+            collisions.push({target: item.new_path, from: [existing, item.old_path]});
+            continue;
+        }
+        targets.set(item.new_path, item.old_path);
+        if (!moving.has(item.new_path) && await fs.pathExists(item.new_path)) {
+            collisions.push({target: item.new_path, from: [item.old_path], note: 'a file that is not part of this run already has that name'});
+        }
+    }
+    if (collisions.length > 0) {
+        return {
+            success: false,
+            error: `${collisions.length} name collision(s) - nothing was changed. Add [%(id)s] to the file output template `
+                 + `so identical titles cannot collide.`,
+            collisions,
+        };
+    }
+
+    const summary = {
+        success: true,
+        subscription: sub.name,
+        dry_run,
+        files_total: files.length,
+        still_in_playlist: kept,
+        removed_from_playlist: gone,
+        playlist_entries: order.size,
+        renames: plan.length,
+        changes: plan.map(item => ({
+            from: path.basename(item.old_path),
+            to: path.basename(item.new_path),
+            position: item.position,
+            in_playlist: item.in_playlist,
+        })),
+    };
+
+    if (dry_run || plan.length === 0) {
+        logger.info(`Renumber: ${sub.name} - ${plan.length} file(s) would be renamed (dry run).`);
+        return summary;
+    }
+
+    // Phase 1: everything out of the way, so a target name that is still held
+    // by another file of this subscription cannot block the rename. If this
+    // half-finishes, put every file back before returning - a folder full of
+    // *.ytm-renumber is worse than a folder with stale numbers.
+    const staged = [];
+    try {
+        for (const item of plan) {
+            for (const sibling of await siblingFiles(item.old_path)) {
+                const from = path.join(item.dir, sibling);
+                const to = from + '.ytm-renumber';
+                await fs.move(from, to, {overwrite: false});
+                staged.push({to_stage: to, from: from, suffix: sibling.slice(item.old_stem.length), item});
+            }
+        }
+    } catch (e) {
+        logger.error(`Renumber: staging failed (${e}) - rolling back.`);
+        for (const entry of staged.reverse()) {
+            try {
+                await fs.move(entry.to_stage, entry.from, {overwrite: false});
+            } catch (rollback_error) {
+                logger.error(`Renumber: could not put ${entry.to_stage} back: ${rollback_error}`);
+            }
+        }
+        return {success: false, error: `Renaming could not be started (${e}) - every file was put back.`};
+    }
+
+    // Phase 2: into the new names. A file that cannot be moved goes back to the
+    // name it came from, and its database record is left alone.
+    const failures = [];
+    const failed_uids = new Set();
+    for (const entry of staged) {
+        const target = path.join(entry.item.dir, entry.item.new_stem + entry.suffix);
+        try {
+            await fs.move(entry.to_stage, target, {overwrite: false});
+        } catch (e) {
+            logger.error(`Renumber: could not rename ${entry.from} to ${target}: ${e}`);
+            failures.push({file: path.basename(entry.from), error: String(e)});
+            failed_uids.add(entry.item.uid);
+            try {
+                await fs.move(entry.to_stage, entry.from, {overwrite: false});
+            } catch (rollback_error) {
+                logger.error(`Renumber: could not put ${entry.to_stage} back either: ${rollback_error}`);
+            }
+        }
+    }
+
+    // The database stores the path, so it has to follow the rename.
+    for (const item of plan) {
+        if (failed_uids.has(item.uid)) continue;
+        const update = {path: item.new_path};
+        const thumbnail = utils.getDownloadedThumbnail(item.new_path);
+        if (thumbnail) update['thumbnailPath'] = thumbnail;
+        await db_api.updateRecord('files', {uid: item.uid}, update);
+    }
+
+    logger.info(`Renumber: ${sub.name} - ${plan.length} file(s) renamed, ${kept} still in the playlist, ${gone} no longer in it.`);
+    summary.failures = failures;
+    return summary;
+};
