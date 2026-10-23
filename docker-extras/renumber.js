@@ -34,6 +34,22 @@ function splitPrefix(stem) {
     return {width: match[1].length, separator: match[2], rest: stem.slice(match[0].length)};
 }
 
+// The video id out of whatever is at hand. Needed because the two sides do not
+// speak the same language: a playlist entry carries the real video id, while a
+// file record's 'id' is its own file name without the extension
+// (files.js: removeFileExtension(basename(file_path))). The reliable link is
+// the watch URL, which both sides have - that is what subscriptions.js matches
+// on as well.
+function videoIdOf(value) {
+    if (!value) return null;
+    const text = String(value);
+    if (!text.includes('/')) return text;                 // already a bare id
+    const query = text.match(/[?&]v=([^&#]+)/);           // .../watch?v=ID
+    if (query) return query[1];
+    const last = text.match(/\/([^/?#]+)(?:[?#]|$)/);     // .../ID
+    return last ? last[1] : null;
+}
+
 function mostCommon(counts, fallback) {
     const entries = Object.entries(counts);
     if (entries.length === 0) return fallback;
@@ -62,14 +78,33 @@ async function getCurrentPlaylistOrder(sub) {
     if (!parsed_output) throw new Error(`the playlist could not be read: ${(err && (err.stderr || err.message)) || err}`);
 
     const order = new Map();
+    const by_url = new Map();
     let advertised = null;
     parsed_output.forEach((entry, i) => {
-        if (!entry || !entry['id']) return;
+        if (!entry) return;
+        const position = entry['playlist_index'] != null ? entry['playlist_index'] : i + 1;
         // A channel does not advertise a count, only a playlist does.
         if (advertised == null && entry['playlist_count'] != null) advertised = entry['playlist_count'];
-        order.set(entry['id'], entry['playlist_index'] != null ? entry['playlist_index'] : i + 1);
+        for (const candidate of [entry['id'], entry['url'], entry['webpage_url']]) {
+            const id = videoIdOf(candidate);
+            if (id) order.set(id, position);
+        }
+        for (const url of [entry['url'], entry['webpage_url']]) {
+            if (url) by_url.set(String(url), position);
+        }
     });
-    return {order, advertised};
+    return {order, by_url, advertised};
+}
+
+// A file's position in the playlist, by URL first and by video id after.
+function positionOf(file, order, by_url) {
+    const direct = by_url.get(String(file['url']));
+    if (direct != null) return direct;
+    for (const candidate of [file['url'], file['id']]) {
+        const id = videoIdOf(candidate);
+        if (id && order.has(id)) return order.get(id);
+    }
+    return null;
 }
 
 // Every file that belongs to one download: the media file plus the sidecars
@@ -98,10 +133,24 @@ exports.renumberSubscription = async (sub_id, {dry_run = true, force = false, on
     const sub = await subscriptions().getSubscription(sub_id);
     if (!sub) return refuse(sub_id, {error: `No subscription with id ${sub_id}.`});
 
-    const files = await db_api.getRecords('files', {sub_id: sub.id});
-    if (!files || files.length === 0) return refuse(sub.name, {error: `Subscription ${sub.name} has no files in the database.`});
+    const all_records = await db_api.getRecords('files', {sub_id: sub.id});
+    if (!all_records || all_records.length === 0) return refuse(sub.name, {error: `Subscription ${sub.name} has no files in the database.`});
 
-    const {order, advertised} = await getCurrentPlaylistOrder(sub);
+    // One file on disk can carry several database records - measured on a real
+    // library, eight records over five paths. Planning per record would hand
+    // the same file to the rename twice, which the collision check would then
+    // report as two files wanting the same name, blaming the output template
+    // for something it did not do. Plan per path, and update every record that
+    // points at it.
+    const by_path = new Map();
+    for (const record of all_records) {
+        const existing = by_path.get(record['path']);
+        if (existing) existing.uids.push(record['uid']);
+        else by_path.set(record['path'], {record, uids: [record['uid']]});
+    }
+    const files = [...by_path.values()].map(entry => entry.record);
+
+    const {order, by_url, advertised} = await getCurrentPlaylistOrder(sub);
     if (order.size === 0) return refuse(sub.name, {error: `The playlist of ${sub.name} returned no entries - nothing was touched.`});
 
     // The playlist says how long it is; if the enumeration came back shorter,
@@ -136,7 +185,7 @@ exports.renumberSubscription = async (sub_id, {dry_run = true, force = false, on
     for (const file of files) {
         const parsed = path.parse(file['path']);
         const {width: has_number, rest} = splitPrefix(parsed.name);
-        const position = order.get(file['id']);
+        const position = positionOf(file, order, by_url);
         if (position != null) kept++; else gone++;
         if (only_numbered && !has_number) continue;
         const new_stem = position != null
@@ -144,7 +193,7 @@ exports.renumberSubscription = async (sub_id, {dry_run = true, force = false, on
             : rest;
         if (new_stem === parsed.name) continue;
         plan.push({
-            uid: file['uid'],
+            uids: by_path.get(file['path']).uids,
             dir: parsed.dir,
             old_stem: parsed.name,
             new_stem: new_stem,
@@ -199,6 +248,7 @@ exports.renumberSubscription = async (sub_id, {dry_run = true, force = false, on
         subscription: sub.name,
         dry_run,
         files_total: files.length,
+        database_records: all_records.length,
         still_in_playlist: kept,
         removed_from_playlist: gone,
         playlist_entries: order.size,
@@ -254,7 +304,7 @@ exports.renumberSubscription = async (sub_id, {dry_run = true, force = false, on
         } catch (e) {
             logger.error(`Renumber: could not rename ${entry.from} to ${target}: ${e}`);
             failures.push({file: path.basename(entry.from), error: String(e)});
-            failed_uids.add(entry.item.uid);
+            failed_uids.add(entry.item.uids[0]);
             try {
                 await fs.move(entry.to_stage, entry.from, {overwrite: false});
             } catch (rollback_error) {
@@ -265,11 +315,11 @@ exports.renumberSubscription = async (sub_id, {dry_run = true, force = false, on
 
     // The database stores the path, so it has to follow the rename.
     for (const item of plan) {
-        if (failed_uids.has(item.uid)) continue;
+        if (failed_uids.has(item.uids[0])) continue;
         const update = {path: item.new_path};
         const thumbnail = utils.getDownloadedThumbnail(item.new_path);
         if (thumbnail) update['thumbnailPath'] = thumbnail;
-        await db_api.updateRecord('files', {uid: item.uid}, update);
+        for (const uid of item.uids) await db_api.updateRecord('files', {uid: uid}, update);
     }
 
     logger.info(`Renumber: ${sub.name} - ${plan.length} file(s) renamed, ${kept} still in the playlist, ${gone} no longer in it.`);
