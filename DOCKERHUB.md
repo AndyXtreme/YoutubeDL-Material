@@ -185,7 +185,7 @@ the already-fetched playlist metadata before the download starts.
 ### Subscriptions run on an interval
 
 Not in real time. New videos appear at the next check
-(**Settings → Subscriptions → Check interval**, in seconds) – or right away if
+(**Settings → Main → Check interval**, in seconds) – or right away if
 you refresh the subscription by hand in the UI.
 
 ### Videos removed from a playlist
@@ -198,7 +198,7 @@ A video **taken out of the playlist** shifts every position behind it, while the
 files on disk keep the number they were downloaded with. The **renumber button**
 on a playlist subscription's page re-derives the numbering from the playlist as
 it is now, after showing what it would rename; files whose video is gone lose
-their number. **Settings → Subscriptions → Renumber files after each check**,
+their number. **Settings → Main → Renumber files after each check**,
 off by default, does it automatically from then on.
 
 It refuses, and changes nothing, when the playlist was read incompletely — yt-dlp

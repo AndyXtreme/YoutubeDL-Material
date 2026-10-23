@@ -164,7 +164,7 @@ Note: YTM automatically creates a folder per playlist for subscriptions (`subscr
 
 ### 3. Subscription interval
 
-Subscriptions are **not** checked in real time, but on a fixed interval (Settings → Subscriptions → *Check interval*, in seconds). New videos appear only at the next check; alternatively, refresh the subscription manually in the UI.
+Subscriptions are **not** checked in real time, but on a fixed interval (Settings → Main → *Check interval*, in seconds). New videos appear only at the next check; alternatively, refresh the subscription manually in the UI.
 
 ### 4. Videos removed from a playlist
 
@@ -185,8 +185,11 @@ INFO: Subscription: RenumberTest checked, 257 new video(s) queued.
 the files already on disk keep the number they were downloaded with. Nothing breaks, but
 the numbering no longer matches the playlist.
 
-Two ways to put it right. On a playlist subscription's page there is a **renumber button**
-(next to *Edit*) which shows what it would rename before it does anything:
+Two ways to put it right. Open a subscription from the subscriptions list — not the list
+itself — and the **renumber button** sits at the top right, immediately left of the pencil.
+It only appears for playlist subscriptions, since a channel has no positions to follow, and
+it is greyed out while a check for that subscription is running. It shows what it would
+rename before it does anything:
 
 ```
 Renumber 260 file(s)?
@@ -198,7 +201,7 @@ Renumber 260 file(s)?
 …
 ```
 
-And **Settings → Subscriptions → Renumber files after each check**, off by default, which
+And **Settings → Main → Renumber files after each check**, off by default, which
 does the same automatically after every check of a playlist subscription. Files whose
 video is still in the playlist get its current position, files whose video is gone lose
 the number altogether, and the database follows the rename along with the `.info.json`
