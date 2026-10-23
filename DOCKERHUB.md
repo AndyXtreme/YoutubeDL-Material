@@ -198,8 +198,11 @@ A video **taken out of the playlist** shifts every position behind it, while the
 files on disk keep the number they were downloaded with. The **renumber button**
 on a playlist subscription's page re-derives the numbering from the playlist as
 it is now, after showing what it would rename; files whose video is gone lose
-their number. **Settings → Main → Renumber files after each check**,
-off by default, does it automatically from then on.
+their number. **Settings → Main → Renumber files after each check**, on by
+default, does it automatically from then on — but only for files that already
+carry a number. It maintains a numbering, it never introduces one, so with the
+stock `%(title)s` template it does nothing until you put `%(playlist_index)s` in
+there. The button has no such restriction, since there you see the preview first.
 
 It refuses, and changes nothing, when the playlist was read incompletely — yt-dlp
 reports the length a playlist claims for itself, so that is an exact check rather

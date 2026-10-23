@@ -201,11 +201,19 @@ Renumber 260 file(s)?
 …
 ```
 
-And **Settings → Main → Renumber files after each check**, off by default, which
-does the same automatically after every check of a playlist subscription. Files whose
-video is still in the playlist get its current position, files whose video is gone lose
-the number altogether, and the database follows the rename along with the `.info.json`
-and the thumbnail.
+And **Settings → Main → Renumber files after each check**, **on by default**, which does
+the same automatically after every check of a playlist subscription. Files whose video is
+still in the playlist get its current position, files whose video is gone lose the number
+altogether, and the database follows the rename along with the `.info.json` and the
+thumbnail.
+
+The automatic pass differs from the button in one way: it only ever touches files that
+**already carry a number**. It maintains a numbering, it never introduces one. That is
+what makes it safe to have on by default — the stock file output template is `%(title)s`,
+so on a normal install it does nothing at all, and it starts working the moment you put
+`%(playlist_index)s` in the template. The button has no such restriction: there you asked
+for it and you see the preview first. An install that already has the setting keeps
+whatever it was set to.
 
 Three situations make it refuse, and nothing is changed when it does:
 

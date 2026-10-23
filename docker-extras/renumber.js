@@ -89,7 +89,12 @@ function refuse(name, result) {
     return Object.assign({success: false}, result);
 }
 
-exports.renumberSubscription = async (sub_id, {dry_run = true, force = false} = {}) => {
+// only_numbered: touch nothing that does not already carry a number. The
+// automatic pass runs it that way, because the stock file output template is
+// %(title)s - without it, switching the automatic pass on would not maintain a
+// numbering, it would impose one on everybody whose files never had one. The
+// button does not set it: there the numbering is asked for and shown first.
+exports.renumberSubscription = async (sub_id, {dry_run = true, force = false, only_numbered = false} = {}) => {
     const sub = await subscriptions().getSubscription(sub_id);
     if (!sub) return refuse(sub_id, {error: `No subscription with id ${sub_id}.`});
 
@@ -130,9 +135,10 @@ exports.renumberSubscription = async (sub_id, {dry_run = true, force = false} = 
     let kept = 0, gone = 0;
     for (const file of files) {
         const parsed = path.parse(file['path']);
-        const {rest} = splitPrefix(parsed.name);
+        const {width: has_number, rest} = splitPrefix(parsed.name);
         const position = order.get(file['id']);
         if (position != null) kept++; else gone++;
+        if (only_numbered && !has_number) continue;
         const new_stem = position != null
             ? String(position).padStart(width, '0') + separator + rest
             : rest;
@@ -286,7 +292,7 @@ exports.renumberAfterCheck = async (sub) => {
     }
 
     try {
-        const result = await exports.renumberSubscription(sub.id, {dry_run: false});
+        const result = await exports.renumberSubscription(sub.id, {dry_run: false, only_numbered: true});
         if (result['success']) {
             if (result['renames'] > 0) logger.info(`Renumber: ${sub.name} - ${result['renames']} file(s) renumbered after the check.`);
         } else if (result['incomplete']) {

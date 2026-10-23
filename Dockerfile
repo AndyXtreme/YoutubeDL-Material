@@ -321,7 +321,7 @@ const patches = [
     name: 'settings: renumber after each check',
     file: 'src/app/settings/settings.component.html',
     find: "                    <div class=\"col-12 mt-3 mb-3\">\n                        <mat-checkbox color=\"accent\" [(ngModel)]=\"new_config['Subscriptions']['redownload_fresh_uploads']\"",
-    replace: "                    <div class=\"col-12 mt-3\">\n                        <mat-checkbox color=\"accent\" [disabled]=\"!new_config['Subscriptions']['allow_subscriptions']\" [(ngModel)]=\"new_config['Subscriptions']['renumber_on_check']\" matTooltip=\"After each check, rename the files of a playlist subscription so the numbering matches the playlist again. Videos that were taken out of the playlist lose their number. Skipped whenever the playlist could only be read partially, so a throttled check cannot scramble the numbering.\" i18n-matTooltip=\"Renumber after check tooltip\"><ng-container i18n=\"Renumber after check\">Renumber files after each check</ng-container></mat-checkbox>\n                    </div>\n                    <div class=\"col-12 mt-3 mb-3\">\n                        <mat-checkbox color=\"accent\" [(ngModel)]=\"new_config['Subscriptions']['redownload_fresh_uploads']\""
+    replace: "                    <div class=\"col-12 mt-3\">\n                        <mat-checkbox color=\"accent\" [disabled]=\"!new_config['Subscriptions']['allow_subscriptions']\" [(ngModel)]=\"new_config['Subscriptions']['renumber_on_check']\" matTooltip=\"After each check, rename the files of a playlist subscription so the numbering matches the playlist again. Only files that already carry a number are touched, so this does nothing unless your file output template contains %(playlist_index)s. Videos that were taken out of the playlist lose their number. Skipped whenever the playlist could only be read partially, so a throttled check cannot scramble the numbering.\" i18n-matTooltip=\"Renumber after check tooltip\"><ng-container i18n=\"Renumber after check\">Renumber files after each check</ng-container></mat-checkbox>\n                    </div>\n                    <div class=\"col-12 mt-3 mb-3\">\n                        <mat-checkbox color=\"accent\" [(ngModel)]=\"new_config['Subscriptions']['redownload_fresh_uploads']\""
 }
 ];
 
@@ -604,12 +604,16 @@ const patches = [
     replace: "const archive_api = require('./archive');\nconst cookies_api = require('./cookies');\nconst renumber_api = require('./renumber');"
 },
 {
-    // The switch for renumbering after a check. Default off: an update must not
-    // start renaming somebody's library on its own.
+    // On by default: the numbering drifting out of step with the playlist is
+    // the problem this exists to solve, and a fix nobody finds is no fix. It is
+    // safe as a default because the automatic pass only ever maintains a
+    // numbering that is already there - see only_numbered in renumber.js - so
+    // for the stock %(title)s template it does nothing at all. An install that
+    // already has the key keeps whatever it was set to.
     name: 'config: renumber_on_check',
     file: 'config.js',
     find: "        \"redownload_fresh_uploads\": false",
-    replace: "        \"redownload_fresh_uploads\": false,\n        \"renumber_on_check\": false"
+    replace: "        \"redownload_fresh_uploads\": false,\n        \"renumber_on_check\": true"
 },
 {
     name: 'config item: ytdl_subscriptions_renumber_on_check',
