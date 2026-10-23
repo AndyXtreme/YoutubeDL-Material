@@ -63,6 +63,133 @@ FROM --platform=${BUILDPLATFORM} node:20-bookworm AS frontend
 WORKDIR /build
 COPY ["package.json", "package-lock.json", "angular.json", "tsconfig.json", "./"]
 COPY ["src/", "./src/"]
+
+# Patches against the YTM frontend, same contract as the backend ones further
+# down: each names the exact code it replaces and the build aborts if that code
+# has changed. These add the "renumber" button on a subscription page and the
+# switch that turns the automatic pass on.
+RUN node - <<'EOF'
+const fs = require('fs');
+
+const patches = [
+{
+    name: 'api: renumberSubscription',
+    file: 'src/app/posts.services.ts',
+    find: "    cancelCheckSubscription(sub_id: string) {\n        const body: CheckSubscriptionRequest = {sub_id: sub_id};\n        return this.http.post<SuccessObject>(this.path + 'cancelCheckSubscription', body, this.httpOptions);\n    }",
+    replace: [
+        "    cancelCheckSubscription(sub_id: string) {",
+        "        const body: CheckSubscriptionRequest = {sub_id: sub_id};",
+        "        return this.http.post<SuccessObject>(this.path + 'cancelCheckSubscription', body, this.httpOptions);",
+        "    }",
+        "",
+        "    renumberSubscription(sub_id: string, dry_run = true, force = false) {",
+        "        return this.http.post<any>(this.path + 'renumberSubscription', {sub_id: sub_id, dry_run: dry_run, force: force}, this.httpOptions);",
+        "    }"
+    ].join('\n')
+},
+{
+    // The dialog renders the preview as plain text, so the line breaks in it
+    // have to survive. Existing single-line dialogs are unaffected.
+    name: 'dialog: keep line breaks in the text',
+    file: 'src/app/dialogs/confirm-dialog/confirm-dialog.component.html',
+    find: "      {{dialogText}}",
+    replace: "      <span style=\"white-space: pre-line;\">{{dialogText}}</span>"
+},
+{
+    name: 'subscription page: import the confirm dialog',
+    file: 'src/app/subscription/subscription/subscription.component.ts',
+    find: "import { EditSubscriptionDialogComponent } from 'app/dialogs/edit-subscription-dialog/edit-subscription-dialog.component';",
+    replace: "import { EditSubscriptionDialogComponent } from 'app/dialogs/edit-subscription-dialog/edit-subscription-dialog.component';\nimport { ConfirmDialogComponent } from 'app/dialogs/confirm-dialog/confirm-dialog.component';"
+},
+{
+    name: 'subscription page: renumber state',
+    file: 'src/app/subscription/subscription/subscription.component.ts',
+    find: "  check_clicked = false;\n  cancel_clicked = false;",
+    replace: "  check_clicked = false;\n  cancel_clicked = false;\n  renumber_clicked = false;"
+},
+{
+    // Preview first, rename only after that is confirmed.
+    name: 'subscription page: renumber action',
+    file: 'src/app/subscription/subscription/subscription.component.ts',
+    find: "  cancelCheckSubscription(): void {",
+    replace: [
+        "  renumberSubscription(): void {",
+        "    this.renumber_clicked = true;",
+        "    this.postsService.renumberSubscription(this.subscription.id, true).subscribe(res => {",
+        "      this.renumber_clicked = false;",
+        "      if (!res['success']) {",
+        "        this.postsService.openSnackBar(res['error'] || 'Renumbering failed!');",
+        "        return;",
+        "      }",
+        "      if (!res['renames']) {",
+        "        this.postsService.openSnackBar('The numbering already matches the playlist.');",
+        "        return;",
+        "      }",
+        "      const shown = res['changes'].slice(0, 12).map(change => change['from'] + '   \\u2192   ' + change['to']).join('\\n');",
+        "      const rest = res['changes'].length > 12 ? '\\n\\u2026 and ' + (res['changes'].length - 12) + ' more' : '';",
+        "      this.dialog.open(ConfirmDialogComponent, {",
+        "        data: {",
+        "          dialogTitle: 'Renumber ' + res['renames'] + ' file(s)?',",
+        "          dialogText: res['still_in_playlist'] + ' of the files are still in the playlist, ' + res['removed_from_playlist']",
+        "            + ' no longer are - those lose their number.\\n\\n' + shown + rest,",
+        "          submitText: 'Rename',",
+        "        }",
+        "      }).afterClosed().subscribe(confirmed => {",
+        "        if (!confirmed) { return; }",
+        "        this.postsService.renumberSubscription(this.subscription.id, false).subscribe(done => {",
+        "          this.postsService.openSnackBar(done['success'] ? done['renames'] + ' file(s) renumbered.' : (done['error'] || 'Renumbering failed!'));",
+        "          this.postsService.files_changed.next(true);",
+        "        }, err => {",
+        "          console.error(err);",
+        "          this.postsService.openSnackBar('Renumbering failed!');",
+        "        });",
+        "      });",
+        "    }, err => {",
+        "      console.error(err);",
+        "      this.renumber_clicked = false;",
+        "      this.postsService.openSnackBar('Renumbering failed!');",
+        "    });",
+        "  }",
+        "",
+        "  cancelCheckSubscription(): void {"
+    ].join('\n')
+},
+{
+    name: 'subscription page: renumber button',
+    file: 'src/app/subscription/subscription/subscription.component.html',
+    find: "            <button class=\"edit-button\" (click)=\"editSubscription()\" [disabled]=\"downloading\" matTooltip=\"Edit\" i18n-matTooltip=\"Edit\" mat-icon-button><mat-icon class=\"save-icon\">edit</mat-icon></button>",
+    replace: [
+        "            <button class=\"edit-button\" (click)=\"editSubscription()\" [disabled]=\"downloading\" matTooltip=\"Edit\" i18n-matTooltip=\"Edit\" mat-icon-button><mat-icon class=\"save-icon\">edit</mat-icon></button>",
+        "            <button *ngIf=\"subscription.isPlaylist\" class=\"renumber-button\" (click)=\"renumberSubscription()\" [disabled]=\"renumber_clicked || subscription.downloading\" matTooltip=\"Renumber files to match the playlist\" i18n-matTooltip=\"Renumber subscription\" mat-icon-button><mat-icon class=\"save-icon\">format_list_numbered</mat-icon></button>"
+    ].join('\n')
+},
+{
+    // .edit-button is pinned to the top right, so the new one needs its own
+    // offset or the two sit on top of each other.
+    name: 'subscription page: renumber button position',
+    file: 'src/app/subscription/subscription/subscription.component.scss',
+    find: ".edit-button {\n    right: 35px;\n    position: fixed;\n    z-index: 99999;\n}",
+    replace: ".edit-button {\n    right: 35px;\n    position: fixed;\n    z-index: 99999;\n}\n\n.renumber-button {\n    right: 80px;\n    position: fixed;\n    z-index: 99999;\n}"
+},
+{
+    name: 'settings: renumber after each check',
+    file: 'src/app/settings/settings.component.html',
+    find: "                    <div class=\"col-12 mt-3 mb-3\">\n                        <mat-checkbox color=\"accent\" [(ngModel)]=\"new_config['Subscriptions']['redownload_fresh_uploads']\"",
+    replace: "                    <div class=\"col-12 mt-3\">\n                        <mat-checkbox color=\"accent\" [disabled]=\"!new_config['Subscriptions']['allow_subscriptions']\" [(ngModel)]=\"new_config['Subscriptions']['renumber_on_check']\" matTooltip=\"After each check, rename the files of a playlist subscription so the numbering matches the playlist again. Videos that were taken out of the playlist lose their number. Skipped whenever the playlist could only be read partially, so a throttled check cannot scramble the numbering.\" i18n-matTooltip=\"Renumber after check tooltip\"><ng-container i18n=\"Renumber after check\">Renumber files after each check</ng-container></mat-checkbox>\n                    </div>\n                    <div class=\"col-12 mt-3 mb-3\">\n                        <mat-checkbox color=\"accent\" [(ngModel)]=\"new_config['Subscriptions']['redownload_fresh_uploads']\""
+}
+];
+
+for (const patch of patches) {
+    const src = fs.readFileSync(patch.file, 'utf8').split('\r\n').join('\n');
+    if (!src.includes(patch.find)) {
+        console.error(`patch '${patch.name}': anchor not found in ${patch.file}, aborting`);
+        process.exit(1);
+    }
+    fs.writeFileSync(patch.file, src.replace(patch.find, patch.replace));
+    console.log(`patch applied: ${patch.name} (${patch.file})`);
+}
+EOF
+
 # @angular/cli comes from devDependencies — no global install needed.
 # npm install instead of npm ci: the bundled package-lock.json is outdated
 # (out of sync). --legacy-peer-deps because of old Angular peer conflicts (ajv 7/8).
@@ -231,7 +358,7 @@ const patches = [
     name: 'log: subscription check result',
     file: 'subscriptions.js',
     find: "    logger.verbose('Subscription: finished check for ' + sub.name);\n    const files_to_download = await handleOutputJSON(parsed_output, sub, user_uid);",
-    replace: "    logger.verbose('Subscription: finished check for ' + sub.name);\n    const files_to_download = await handleOutputJSON(parsed_output, sub, user_uid);\n    logger.info(`Subscription: ${sub.name} checked, ${files_to_download.length} new video(s) queued.`);"
+    replace: "    logger.verbose('Subscription: finished check for ' + sub.name);\n    const files_to_download = await handleOutputJSON(parsed_output, sub, user_uid);\n    logger.info(`Subscription: ${sub.name} checked, ${files_to_download.length} new video(s) queued.`);\n    await renumber_api.renumberAfterCheck(sub);"
 },
 {
     name: 'log: nothing new for a subscription',
@@ -325,10 +452,24 @@ const patches = [
     replace: "        if (useCookies) {\n            downloadConfig.push(...await cookies_api.cookieArgs('download'));\n        }"
 },
 {
-    name: 'cookies: require the helper in subscriptions.js',
+    name: 'require the helpers in subscriptions.js',
     file: 'subscriptions.js',
     find: "const archive_api = require('./archive');",
-    replace: "const archive_api = require('./archive');\nconst cookies_api = require('./cookies');"
+    replace: "const archive_api = require('./archive');\nconst cookies_api = require('./cookies');\nconst renumber_api = require('./renumber');"
+},
+{
+    // The switch for renumbering after a check. Default off: an update must not
+    // start renaming somebody's library on its own.
+    name: 'config: renumber_on_check',
+    file: 'config.js',
+    find: "        \"redownload_fresh_uploads\": false",
+    replace: "        \"redownload_fresh_uploads\": false,\n        \"renumber_on_check\": false"
+},
+{
+    name: 'config item: ytdl_subscriptions_renumber_on_check',
+    file: 'consts.js',
+    find: "    'ytdl_subscriptions_redownload_fresh_uploads': {\n        'key': 'ytdl_subscriptions_redownload_fresh_uploads',\n        'path': 'YoutubeDLMaterial.Subscriptions.redownload_fresh_uploads'\n    },",
+    replace: "    'ytdl_subscriptions_redownload_fresh_uploads': {\n        'key': 'ytdl_subscriptions_redownload_fresh_uploads',\n        'path': 'YoutubeDLMaterial.Subscriptions.redownload_fresh_uploads'\n    },\n    'ytdl_subscriptions_renumber_on_check': {\n        'key': 'ytdl_subscriptions_renumber_on_check',\n        'path': 'YoutubeDLMaterial.Subscriptions.renumber_on_check'\n    },"
 },
 {
     name: 'cookies: require the helper in downloader.js',

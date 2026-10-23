@@ -15,10 +15,13 @@ const path = require('path');
 
 const config_api = require('./config');
 const db_api = require('./db');
-const subscriptions_api = require('./subscriptions');
 const youtubedl_api = require('./youtube-dl');
 const utils = require('./utils');
 const logger = require('./logger');
+
+// subscriptions.js requires this file, so pull it in only when it is needed -
+// a top-level require here would close the circle.
+const subscriptions = () => require('./subscriptions');
 
 // "007 - Title [id].mp4", "7. Title.mp4", "07_Title.mp4": separator and padding
 // are whatever the output template produced, so read them off the files that
@@ -37,7 +40,10 @@ function mostCommon(counts, fallback) {
     return entries.sort((a, b) => b[1] - a[1])[0][0];
 }
 
-// The playlist as it is right now: video id -> current position.
+// The playlist as it is right now: video id -> current position, plus the
+// length the playlist claims for itself. The two together are what makes it
+// safe to rename unattended: if fewer entries came back than the playlist says
+// it has, the enumeration was cut short and its order must not be acted on.
 async function getCurrentPlaylistOrder(sub) {
     const args = ['--flat-playlist', '--dump-json'];
     const use_cookies = config_api.getConfigItem('ytdl_use_cookies');
@@ -56,11 +62,14 @@ async function getCurrentPlaylistOrder(sub) {
     if (!parsed_output) throw new Error(`the playlist could not be read: ${(err && (err.stderr || err.message)) || err}`);
 
     const order = new Map();
+    let advertised = null;
     parsed_output.forEach((entry, i) => {
         if (!entry || !entry['id']) return;
+        // A channel does not advertise a count, only a playlist does.
+        if (advertised == null && entry['playlist_count'] != null) advertised = entry['playlist_count'];
         order.set(entry['id'], entry['playlist_index'] != null ? entry['playlist_index'] : i + 1);
     });
-    return order;
+    return {order, advertised};
 }
 
 // Every file that belongs to one download: the media file plus the sidecars
@@ -73,14 +82,29 @@ async function siblingFiles(file_path) {
 }
 
 exports.renumberSubscription = async (sub_id, {dry_run = true, force = false} = {}) => {
-    const sub = await subscriptions_api.getSubscription(sub_id);
+    const sub = await subscriptions().getSubscription(sub_id);
     if (!sub) return {success: false, error: `No subscription with id ${sub_id}.`};
 
     const files = await db_api.getRecords('files', {sub_id: sub.id});
     if (!files || files.length === 0) return {success: false, error: `Subscription ${sub.name} has no files in the database.`};
 
-    const order = await getCurrentPlaylistOrder(sub);
+    const {order, advertised} = await getCurrentPlaylistOrder(sub);
     if (order.size === 0) return {success: false, error: `The playlist of ${sub.name} returned no entries - nothing was touched.`};
+
+    // The playlist says how long it is; if the enumeration came back shorter,
+    // YouTube cut it off and its order is not the real order. Renaming on that
+    // basis would strip the numbering off everything that did not make it into
+    // the answer, and put it back on the next run - names flapping back and
+    // forth across the whole library.
+    if (!force && advertised != null && order.size < advertised) {
+        return {
+            success: false,
+            error: `The playlist claims ${advertised} entries but only ${order.size} came back, so it was read `
+                 + `incompletely - probably throttling, or cookies that no longer work. Nothing was changed. `
+                 + `Use "force": true to renumber on a partial list anyway.`,
+            incomplete: true, playlist_entries: order.size, playlist_claims: advertised,
+        };
+    }
 
     // Padding and separator: follow what the existing files use.
     const widths = {}, separators = {};
@@ -167,6 +191,7 @@ exports.renumberSubscription = async (sub_id, {dry_run = true, force = false} = 
         still_in_playlist: kept,
         removed_from_playlist: gone,
         playlist_entries: order.size,
+        playlist_claims: advertised,
         renames: plan.length,
         changes: plan.map(item => ({
             from: path.basename(item.old_path),
@@ -239,4 +264,34 @@ exports.renumberSubscription = async (sub_id, {dry_run = true, force = false} = 
     logger.info(`Renumber: ${sub.name} - ${plan.length} file(s) renamed, ${kept} still in the playlist, ${gone} no longer in it.`);
     summary.failures = failures;
     return summary;
+};
+
+// Called after every subscription check. Off unless switched on, and it stays
+// out of the way whenever the situation is not clearly safe: the completeness
+// check above does the deciding, and downloads that are still pending get to
+// finish first so nothing is renamed out from under them.
+exports.renumberAfterCheck = async (sub) => {
+    if (!config_api.getConfigItem('ytdl_subscriptions_renumber_on_check')) return;
+    if (!sub || !sub.id || !sub.isPlaylist) return;
+
+    const pending = await db_api.getRecords('download_queue', {sub_id: sub.id, finished: false});
+    if (pending && pending.length > 0) {
+        logger.verbose(`Renumber: ${sub.name} left alone for now, ${pending.length} download(s) still pending.`);
+        return;
+    }
+
+    try {
+        const result = await exports.renumberSubscription(sub.id, {dry_run: false});
+        if (result['success']) {
+            if (result['renames'] > 0) logger.info(`Renumber: ${sub.name} - ${result['renames']} file(s) renumbered after the check.`);
+        } else if (result['incomplete']) {
+            logger.info(`Renumber: ${sub.name} skipped - ${result['error']}`);
+        } else if (result['collisions']) {
+            logger.warn(`Renumber: ${sub.name} skipped - ${result['error']}`);
+        } else {
+            logger.verbose(`Renumber: ${sub.name} skipped - ${result['error']}`);
+        }
+    } catch (e) {
+        logger.error(`Renumber: ${sub.name} failed after the check: ${e}`);
+    }
 };

@@ -23,7 +23,7 @@ The original project was built on **Node 16** (end-of-life) and **MongoDB 4**. A
 | Subscription checks | invisible at the default log level, and a failed check can block the subscription for good | **logged**, and the blocking flag is always cleared |
 | A playlist containing a deleted or private video | one unavailable entry makes yt-dlp exit non-zero, the entire check counts as failed, and **nothing** from that playlist is ever downloaded | the videos that did come back are **used**, the dead entry is skipped and named in the log |
 | Cookies | every concurrent download is handed the same `cookies.txt` and writes it back on exit, so a slow process overwrites fresh cookies with its stale ones and the session dies | each run works on **its own copy**, and a single keeper refreshes the master jar |
-| Numbering after a video leaves a playlist | files keep the position they were downloaded with, so the numbering drifts out of step for good | `renumberSubscription` **re-derives** the numbers from the playlist as it is now |
+| Numbering after a video leaves a playlist | files keep the position they were downloaded with, so the numbering drifts out of step for good | a **button** on the subscription page, and optionally **after every check**, re-derives the numbers from the playlist as it is now |
 | Architectures | amd64 | **amd64 + arm64** |
 | Long playlists | capped at 100 videos | documented: cookies + `yt-dlp` as downloader |
 
@@ -182,27 +182,54 @@ INFO: Subscription: RenumberTest checked, 257 new video(s) queued.
 
 **A video taken out of the playlist** shifts the position of every video behind it, while
 the files already on disk keep the number they were downloaded with. Nothing breaks, but
-the numbering no longer matches the playlist. To bring it back in line:
+the numbering no longer matches the playlist.
+
+Two ways to put it right. On a playlist subscription's page there is a **renumber button**
+(next to *Edit*) which shows what it would rename before it does anything:
+
+```
+Renumber 260 file(s)?
+
+259 of the files are still in the playlist, 1 no longer is - those lose their number.
+
+002 - Titel 001 [szM-KGgGUpI]   →   001 - Titel 001 [szM-KGgGUpI]
+000 - Rausgeflogen [xxGONExx]   →   Rausgeflogen [xxGONExx]
+…
+```
+
+And **Settings → Subscriptions → Renumber files after each check**, off by default, which
+does the same automatically after every check of a playlist subscription. Files whose
+video is still in the playlist get its current position, files whose video is gone lose
+the number altogether, and the database follows the rename along with the `.info.json`
+and the thumbnail.
+
+Three situations make it refuse, and nothing is changed when it does:
+
+- **The playlist was read incompletely.** yt-dlp reports the length the playlist claims
+  for itself, so this is an exact check, not a guess: 259 claimed and 200 returned means
+  YouTube cut the listing short, and acting on that order would strip the numbering off
+  the 59 that did not come back — and put it back on the next run, names flapping across
+  the whole library. This is what makes the automatic mode safe to leave on.
+- **Two files would end up with the same name.** Add `[%(id)s]` to the output template so
+  identical titles cannot collide.
+- **More files are missing from the playlist than are still in it**, the fallback for a
+  channel subscription, which does not advertise a length.
+
+The automatic pass also waits while downloads for that subscription are still pending, so
+nothing is renamed out from under a running download — it renumbers at the next check
+instead.
+
+The same thing is available over the API, which is how to pass `force` to override the
+first and third refusal:
 
 ```bash
 curl -s -X POST "http://<HOST-IP>:17442/api/renumberSubscription?apiKey=<YOUR-API-KEY>" \
   -H "Content-Type: application/json" -d '{"sub_id":"<SUB-ID>"}'
 ```
 
-That is a **dry run**: it answers with the renames it would make and touches nothing. Add
-`"dry_run": false` to carry them out. Files whose video is still in the playlist get its
-current position, files whose video is gone lose the number altogether, and the database
-follows the rename along with the `.info.json` and the thumbnail.
-
-It refuses to run in two situations, and changes nothing when it does: if two files would
-end up with the same name (add `[%(id)s]` to the output template), and if more files are
-missing from the playlist than are still in it — which is what a playlist that was only
-read *partially* looks like, and stripping the numbering off a whole library because
-YouTube throttled the enumeration is not a trade worth making. `"force": true` overrides
-the second one.
-
-The API key is in **Settings → Advanced → API key** (enable the public API first).
-`sub_id` is the id in the URL of the subscription's page in the web UI.
+That call is a dry run and answers with the list of renames; add `"dry_run": false` to
+carry them out, and `"force": true` to renumber on a partial listing anyway. `sub_id` is
+the id in the URL of the subscription's page.
 
 ### 5. Cookies stay valid on their own
 

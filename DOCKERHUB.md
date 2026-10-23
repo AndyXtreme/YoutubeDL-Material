@@ -40,7 +40,7 @@ Self-hosted, no cloud, no account anywhere. Multi-arch: **amd64 + arm64**.
 | Subscription checks | invisible at the default log level, and a failed check can block the subscription for good | **logged**, and the blocking flag is always cleared |
 | A playlist containing a deleted or private video | one unavailable entry makes yt-dlp exit non-zero, the whole check counts as failed, and **nothing** from that playlist is downloaded | the videos that did come back are **used** |
 | Cookies | every concurrent download shares one `cookies.txt` and writes it back, so stale cookies overwrite fresh ones and the session dies | each run gets **its own copy**, one keeper refreshes the master jar |
-| Numbering after a video leaves a playlist | files keep the number they were downloaded with, for good | an endpoint **re-derives** the numbers from the playlist as it is now |
+| Numbering after a video leaves a playlist | files keep the number they were downloaded with, for good | a **button**, and optionally **after every check**, re-derives the numbers from the playlist as it is now |
 | Architectures | amd64 | **amd64 + arm64** |
 
 The patches are applied at build time; each one names the exact upstream code it
@@ -194,11 +194,17 @@ an error, which upstream treats as a failed check – one dead entry and the who
 playlist stops downloading. This image uses the entries that did come back.
 
 A video **taken out of the playlist** shifts every position behind it, while the
-files on disk keep the number they were downloaded with. `renumberSubscription`
-re-derives the numbering from the playlist as it is now; files whose video is
-gone lose their number. It is a dry run unless asked otherwise, and refuses to
-act on name collisions or on a playlist that looks only partially read. See the
-README for the call.
+files on disk keep the number they were downloaded with. The **renumber button**
+on a playlist subscription's page re-derives the numbering from the playlist as
+it is now, after showing what it would rename; files whose video is gone lose
+their number. **Settings → Subscriptions → Renumber files after each check**,
+off by default, does it automatically from then on.
+
+It refuses, and changes nothing, when the playlist was read incompletely — yt-dlp
+reports the length a playlist claims for itself, so that is an exact check rather
+than a guess, and a throttled listing cannot scramble the numbering. Likewise
+when two files would end up with the same name. See the README for the details
+and the API call.
 
 ### Cookies
 
