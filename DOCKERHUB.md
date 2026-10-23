@@ -257,6 +257,7 @@ download, and what you do with it, is your responsibility.
 | Tag | |
 |---|---|
 | `latest` | current state |
+| `1.5` | fixed version – renumbering on by default |
 | `1.4` | fixed version – renumber button, cookie status |
 | `1.3` | fixed version – playlists, renumbering, cookies |
 | `1.2` | fixed version – subscription fixes |
