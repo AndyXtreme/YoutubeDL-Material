@@ -45,6 +45,15 @@ const COPY_MAX_AGE_HOURS = 24;
 let refresh_running = false;
 let refresh_timer = null;
 
+// Result of the last request made with the master jar, so the settings page can
+// show whether the cookies still work instead of leaving it to the log.
+let last_check = null;   // {at, ok, message}
+
+// The cookies that actually carry a YouTube login. A jar exported while signed
+// out looks perfectly well-formed and contains none of these - worth saying so
+// plainly, because the file itself gives no hint.
+const AUTH_COOKIES = ['__Secure-1PSID', '__Secure-3PSID', 'SID', 'HSID', 'SSID', 'SAPISID', 'LOGIN_INFO'];
+
 // A private jar for one yt-dlp run. Returns the arguments to append, or nothing
 // at all when cookies are switched off or the file is missing - same contract
 // as the upstream code this replaces.
@@ -86,19 +95,31 @@ async function sweepOldCopies() {
 // and which says whether the session still authenticates. :ytwatchlater is
 // account-bound and tiny, so it answers both questions cheaply.
 async function refreshMaster() {
-    if (refresh_running) return;
-    if (!config_api.getConfigItem('ytdl_use_cookies')) return;
-    if (!await fs.pathExists(MASTER)) return;
+    if (refresh_running) return last_check;
+    if (!config_api.getConfigItem('ytdl_use_cookies')) return null;
+    if (!await fs.pathExists(MASTER)) return null;
 
     refresh_running = true;
     const youtubedl_api = require('./youtube-dl');
+    // Never hand the master itself to yt-dlp. yt-dlp writes back whatever the
+    // session ended up as, and a request that was answered anonymously ends up
+    // as a jar with no login in it at all - measured: a rejected jar came back
+    // with eight tracking cookies and not one of the login cookies. Refreshing
+    // on the master directly would mean a single bad answer, or one transient
+    // YouTube error, quietly strips the login out of the uploaded file. So
+    // refresh on a copy and promote it only if it still carries a login.
+    const probe_relative = path.join(COPIES_RELATIVE, 'keeper.txt');
+    const probe = path.join(COPIES, 'keeper.txt');
     try {
-        const args = ['--cookies', MASTER_RELATIVE, '--flat-playlist', '--playlist-items', '1',
+        await fs.ensureDir(COPIES);
+        await fs.copy(MASTER, probe, {overwrite: true});
+
+        const args = ['--cookies', probe_relative, '--flat-playlist', '--playlist-items', '1',
                       '--simulate', '--ignore-config', '--print', '%(id)s'];
         const {callback} = await youtubedl_api.runYoutubeDL(':ytwatchlater', args) || {};
         if (!callback) {
             logger.warn('Cookies: refresh skipped, the downloader could not be started.');
-            return;
+            return last_check;
         }
         const {err} = await callback;
         const stderr = String((err && (err.stderr || err.message)) || err || '');
@@ -108,18 +129,101 @@ async function refreshMaster() {
         // on a request that only needs a working session is worth reporting -
         // at warn, because a hiccup is not worth shouting about.
         const rejected = stderr.split('\n').find(line => line.startsWith('ERROR:'));
-        if (rejected) {
-            logger.warn('Cookies: the refresh request was rejected, which usually means the stored cookies no longer work - '
-                      + `upload a fresh cookies.txt. The downloader said: ${rejected}`);
-        } else {
+        const refreshed = await readJar(probe);
+
+        if (!rejected && refreshed.auth_cookies > 0) {
+            await fs.copy(probe, MASTER, {overwrite: true});
             logger.verbose('Cookies: master jar refreshed.');
+            last_check = {at: Date.now(), ok: true, message: ''};
+        } else {
+            const reason = rejected
+                ? rejected.replace(/^ERROR:\s*/, '')
+                : 'YouTube answered the request but renewed no login - the cookies are not being accepted.';
+            logger.warn('Cookies: the refresh was rejected, which usually means the stored cookies no longer work - '
+                      + `upload a fresh cookies.txt. Reason: ${reason}`);
+            last_check = {at: Date.now(), ok: false, message: reason};
         }
     } catch (e) {
         logger.warn(`Cookies: refresh failed (${e}).`);
+        last_check = {at: Date.now(), ok: false, message: `the check itself failed: ${e}`};
     } finally {
+        await fs.remove(probe).catch(() => {});
         refresh_running = false;
     }
+    return last_check;
 }
+
+// What a jar itself says, without asking YouTube.
+async function readJar(file = MASTER) {
+    const facts = {cookie_count: 0, auth_cookies: 0, expires: null};
+    let text = '';
+    try {
+        text = await fs.readFile(file, 'utf8');
+    } catch (e) {
+        return facts;
+    }
+    for (const line of text.split('\n')) {
+        // '#HttpOnly_' is a real entry some exporters write, any other '#' is a comment.
+        const row = line.startsWith('#HttpOnly_') ? line.slice('#HttpOnly_'.length) : line;
+        if (!row || row.startsWith('#')) continue;
+        const fields = row.split('\t');
+        if (fields.length < 7) continue;
+        facts.cookie_count++;
+        if (!AUTH_COOKIES.includes(fields[5])) continue;
+        facts.auth_cookies++;
+        // 0 means a session cookie, which has no useful date.
+        const expires = parseInt(fields[4], 10) * 1000;
+        if (expires > 0 && (facts.expires === null || expires < facts.expires)) facts.expires = expires;
+    }
+    return facts;
+}
+
+// One line for the settings page: is this jar going to work, and since when do
+// we believe that.
+exports.status = async () => {
+    const enabled = !!config_api.getConfigItem('ytdl_use_cookies');
+    const file_present = await fs.pathExists(MASTER);
+    const status = {
+        enabled, file_present, state: 'unknown', message: '',
+        last_checked: last_check ? last_check.at : null,
+        file_modified: null, cookie_count: 0, auth_cookies: 0, expires: null,
+        refresh_minutes: REFRESH_MINUTES,
+    };
+
+    if (!file_present) {
+        status.state = 'missing';
+        return status;
+    }
+
+    try {
+        status.file_modified = (await fs.stat(MASTER)).mtimeMs;
+    } catch (e) {
+        // not worth failing the whole status over
+    }
+    Object.assign(status, await readJar());
+
+    if (status.auth_cookies === 0) {
+        // No point asking YouTube: this jar cannot authenticate anything.
+        status.state = 'no_login';
+        return status;
+    }
+    if (!enabled) {
+        status.state = 'off';
+        return status;
+    }
+    if (last_check) {
+        status.state = last_check.ok ? 'ok' : 'rejected';
+        status.message = last_check.message;
+    }
+    return status;
+};
+
+// Check right now instead of waiting for the timer - what the button on the
+// settings page calls, and what runs after a fresh upload.
+exports.checkNow = async () => {
+    if (config_api.getConfigItem('ytdl_use_cookies') && await fs.pathExists(MASTER)) await refreshMaster();
+    return exports.status();
+};
 
 exports.start = () => {
     if (refresh_timer) return;

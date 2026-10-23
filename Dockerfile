@@ -172,6 +172,118 @@ const patches = [
     replace: ".edit-button {\n    right: 35px;\n    position: fixed;\n    z-index: 99999;\n}\n\n.renumber-button {\n    right: 80px;\n    position: fixed;\n    z-index: 99999;\n}"
 },
 {
+    name: 'api: cookie status',
+    file: 'src/app/posts.services.ts',
+    find: "    uploadCookiesFile(cookiesFile: File, cookiesFilePath: string) {",
+    replace: [
+        "    getCookieStatus() {",
+        "        return this.http.post<any>(this.path + 'getCookieStatus', {}, this.httpOptions);",
+        "    }",
+        "",
+        "    checkCookies() {",
+        "        return this.http.post<any>(this.path + 'checkCookies', {}, this.httpOptions);",
+        "    }",
+        "",
+        "    uploadCookiesFile(cookiesFile: File, cookiesFilePath: string) {"
+    ].join('\n')
+},
+{
+    name: 'settings: cookie status state',
+    file: 'src/app/settings/settings.component.ts',
+    find: "  db_info: DBInfoResponse = null;\n  db_transferring = false;",
+    replace: "  db_info: DBInfoResponse = null;\n  db_transferring = false;\n  cookie_status = null;\n  cookie_checking = false;"
+},
+{
+    name: 'settings: cookie status loader',
+    file: 'src/app/settings/settings.component.ts',
+    find: "  openCookiesUploaderDialog(): void {\n    this.dialog.open(CookiesUploaderDialogComponent, {\n      width: '65vw'\n    });\n  }",
+    replace: [
+        "  openCookiesUploaderDialog(): void {",
+        "    this.dialog.open(CookiesUploaderDialogComponent, {",
+        "      width: '65vw'",
+        "    }).afterClosed().subscribe(() => this.checkCookiesNow());",
+        "  }",
+        "",
+        "  getCookieStatus(): void {",
+        "    this.postsService.getCookieStatus().subscribe(res => {",
+        "      this.cookie_status = res;",
+        "    }, err => console.error(err));",
+        "  }",
+        "",
+        "  checkCookiesNow(): void {",
+        "    this.cookie_checking = true;",
+        "    this.postsService.checkCookies().subscribe(res => {",
+        "      this.cookie_checking = false;",
+        "      this.cookie_status = res;",
+        "    }, err => {",
+        "      console.error(err);",
+        "      this.cookie_checking = false;",
+        "    });",
+        "  }",
+        "",
+        "  cookieStatusText(): string {",
+        "    const status = this.cookie_status;",
+        "    if (!status) { return ''; }",
+        "    switch (status['state']) {",
+        "      case 'missing':  return $localize`No cookies file uploaded yet.`;",
+        "      case 'no_login': return $localize`The uploaded file carries no YouTube login - it was most likely exported while signed out.`;",
+        "      case 'off':      return $localize`A usable file is stored, but \"Use Cookies\" is switched off.`;",
+        "      case 'ok':       return $localize`Cookies accepted by YouTube.`;",
+        "      case 'rejected': return $localize`YouTube rejected the cookies: ` + status['message'];",
+        "      default:         return $localize`Not checked yet.`;",
+        "    }",
+        "  }",
+        "",
+        "  cookieStatusIcon(): string {",
+        "    const state = this.cookie_status ? this.cookie_status['state'] : '';",
+        "    if (state === 'ok') { return 'check_circle'; }",
+        "    if (state === 'rejected' || state === 'no_login') { return 'error'; }",
+        "    if (state === 'missing') { return 'info'; }",
+        "    return 'help';",
+        "  }",
+        "",
+        "  cookieStatusDetail(): string {",
+        "    const status = this.cookie_status;",
+        "    if (!status || !status['file_present']) { return ''; }",
+        "    const parts = [status['cookie_count'] + ' cookies, ' + status['auth_cookies'] + ' of them login cookies'];",
+        "    if (status['expires']) { parts.push((status['expires'] < Date.now() ? 'a login cookie expired on ' : 'valid until ') + new Date(status['expires']).toLocaleDateString()); }",
+        "    if (status['last_checked']) { parts.push('last checked ' + new Date(status['last_checked']).toLocaleTimeString()); }",
+        "    if (status['state'] === 'ok') { parts.push('refreshed every ' + status['refresh_minutes'] + ' min'); }",
+        "    return parts.join(' \\u00b7 ');",
+        "  }"
+    ].join('\n')
+},
+{
+    name: 'settings: load the cookie status on open',
+    file: 'src/app/settings/settings.component.ts',
+    find: "      this.getConfig();\n      this.getDBInfo();",
+    replace: "      this.getConfig();\n      this.getDBInfo();\n      this.getCookieStatus();"
+},
+{
+    name: 'settings: load the cookie status on open (deferred)',
+    file: 'src/app/settings/settings.component.ts',
+    find: "          this.getConfig();\n          this.getDBInfo();",
+    replace: "          this.getConfig();\n          this.getDBInfo();\n          this.getCookieStatus();"
+},
+{
+    // The line that was missing: upload a file, press a switch, and until now
+    // nothing ever said whether any of it worked.
+    name: 'settings: cookie status line',
+    file: 'src/app/settings/settings.component.html',
+    find: "                        <button class=\"checkbox-button\" mat-stroked-button (click)=\"openCookiesUploaderDialog()\"><ng-container i18n=\"Set cookies button\">Set Cookies</ng-container></button>",
+    replace: [
+        "                        <button class=\"checkbox-button\" mat-stroked-button (click)=\"openCookiesUploaderDialog()\"><ng-container i18n=\"Set cookies button\">Set Cookies</ng-container></button>",
+        "                        <button class=\"checkbox-button\" mat-stroked-button [disabled]=\"cookie_checking || !cookie_status || !cookie_status['file_present']\" (click)=\"checkCookiesNow()\"><ng-container i18n=\"Check cookies button\">Check now</ng-container><mat-spinner *ngIf=\"cookie_checking\" style=\"display: inline-block; margin-left: 8px;\" [diameter]=\"16\"></mat-spinner></button>",
+        "                        <div *ngIf=\"cookie_status\" style=\"margin-top: 10px; display: flex; align-items: flex-start;\">",
+        "                            <mat-icon [ngStyle]=\"{'color': cookie_status['state'] === 'ok' ? '#4caf50' : (cookie_status['state'] === 'rejected' || cookie_status['state'] === 'no_login' ? '#f44336' : 'inherit')}\" style=\"margin-right: 8px;\">{{cookieStatusIcon()}}</mat-icon>",
+        "                            <div>",
+        "                                <div>{{cookieStatusText()}}</div>",
+        "                                <div *ngIf=\"cookieStatusDetail()\" style=\"opacity: 0.7; font-size: 90%;\">{{cookieStatusDetail()}}</div>",
+        "                            </div>",
+        "                        </div>"
+    ].join('\n')
+},
+{
     name: 'settings: renumber after each check',
     file: 'src/app/settings/settings.component.html',
     find: "                    <div class=\"col-12 mt-3 mb-3\">\n                        <mat-checkbox color=\"accent\" [(ngModel)]=\"new_config['Subscriptions']['redownload_fresh_uploads']\"",
@@ -476,6 +588,24 @@ const patches = [
     file: 'downloader.js',
     find: "const archive_api = require('./archive');",
     replace: "const archive_api = require('./archive');\nconst cookies_api = require('./cookies');"
+},
+{
+    // So the settings page can say whether the stored jar still works, instead
+    // of that only being visible in the log.
+    name: 'endpoints: cookie status',
+    file: 'app.js',
+    find: "var upload_multer = multer({ dest: __dirname + '/appdata/' });",
+    replace: [
+        "app.post('/api/getCookieStatus', optionalJwt, async (req, res) => {",
+        "    res.send(await cookies_api.status());",
+        "});",
+        "",
+        "app.post('/api/checkCookies', optionalJwt, async (req, res) => {",
+        "    res.send(await cookies_api.checkNow());",
+        "});",
+        "",
+        "var upload_multer = multer({ dest: __dirname + '/appdata/' });"
+    ].join('\n')
 },
 {
     // The one serialized writer that keeps the master jar fresh.

@@ -40,6 +40,7 @@ Self-hosted, no cloud, no account anywhere. Multi-arch: **amd64 + arm64**.
 | Subscription checks | invisible at the default log level, and a failed check can block the subscription for good | **logged**, and the blocking flag is always cleared |
 | A playlist containing a deleted or private video | one unavailable entry makes yt-dlp exit non-zero, the whole check counts as failed, and **nothing** from that playlist is downloaded | the videos that did come back are **used** |
 | Cookies | every concurrent download shares one `cookies.txt` and writes it back, so stale cookies overwrite fresh ones and the session dies | each run gets **its own copy**, one keeper refreshes the master jar |
+| Whether the cookies still work | nothing says so, anywhere | **shown in Settings → Advanced**, with a *Check now* button |
 | Numbering after a video leaves a playlist | files keep the number they were downloaded with, for good | a **button**, and optionally **after every check**, re-derives the numbers from the playlist as it is now |
 | Architectures | amd64 | **amd64 + arm64** |
 
@@ -213,8 +214,15 @@ YouTube, so a cookie jar is the only durable authentication. Upstream hands the
 same `cookies.txt` to every concurrent download and each one writes it back on
 exit, so stale cookies overwrite fresh ones and the session dies after a while.
 Here each run works on its own copy and a single keeper refreshes the master jar
-every 30 minutes, reporting in the log when YouTube stops accepting it. Export
-the jar from a private window you close *without* logging out.
+every 30 minutes — on a copy as well, which replaces the master only if it still
+carries a login, so one anonymous answer from YouTube cannot strip the login out
+of the file you uploaded.
+
+**Settings → Advanced** shows where the jar stands: accepted by YouTube, rejected
+with YouTube's own wording, or carrying no login at all — the last being a common
+and otherwise invisible mistake, a file exported while signed out. *Check now*
+asks immediately, and a fresh upload is checked as soon as the dialog closes.
+Export the jar from a private window you close *without* logging out.
 
 ---
 

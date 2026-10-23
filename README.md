@@ -22,7 +22,8 @@ The original project was built on **Node 16** (end-of-life) and **MongoDB 4**. A
 | Deleting a subscription | the request never answers, a `TypeError` per second in the log | **answered cleanly**, log stays quiet |
 | Subscription checks | invisible at the default log level, and a failed check can block the subscription for good | **logged**, and the blocking flag is always cleared |
 | A playlist containing a deleted or private video | one unavailable entry makes yt-dlp exit non-zero, the entire check counts as failed, and **nothing** from that playlist is ever downloaded | the videos that did come back are **used**, the dead entry is skipped and named in the log |
-| Cookies | every concurrent download is handed the same `cookies.txt` and writes it back on exit, so a slow process overwrites fresh cookies with its stale ones and the session dies | each run works on **its own copy**, and a single keeper refreshes the master jar |
+| Cookies | every concurrent download is handed the same `cookies.txt` and writes it back on exit, so a slow process overwrites fresh cookies with its stale ones and the session dies | each run works on **its own copy**, and a single keeper refreshes the master jar — on a copy too, promoted only if it still carries a login |
+| Whether the cookies still work | nothing says so, anywhere | **shown in Settings → Advanced**, with a *Check now* button |
 | Numbering after a video leaves a playlist | files keep the position they were downloaded with, so the numbering drifts out of step for good | a **button** on the subscription page, and optionally **after every check**, re-derives the numbers from the playlist as it is now |
 | Architectures | amd64 | **amd64 + arm64** |
 | Long playlists | capped at 100 videos | documented: cookies + `yt-dlp` as downloader |
@@ -247,18 +248,42 @@ between instances for exactly this reason.
 
 In this edition every run works on its own copy under `appdata/cookie-copies/`, which it
 may write to as it likes and which is then swept up, and one keeper run refreshes the
-master jar every 30 minutes — the only writer there is. If YouTube stops accepting the
-jar, that shows up in the log instead of as downloads that quietly fail:
+master jar every 30 minutes — the only writer there is.
+
+That refresh also runs on a copy, and the copy replaces the master only if it still
+carries a login. This matters more than it sounds: yt-dlp writes back whatever the session
+ended up as, so a request YouTube answered anonymously comes back as a jar with no login
+in it at all — measured, a rejected jar returned with eight tracking cookies and not one
+login cookie. Refreshing the master directly would mean one bad answer silently strips the
+login out of the file you uploaded.
+
+**Settings → Advanced** shows where the jar stands, instead of leaving that to the log:
 
 ```
-WARN: Cookies: the refresh request was rejected, which usually means the stored cookies
-      no longer work - upload a fresh cookies.txt.
+✓  Cookies accepted by YouTube.
+   14 cookies, 5 of them login cookies · valid until 28/04/2027 · last checked 21:14:08 · refreshed every 30 min
 ```
 
-Upload a jar once (Settings → Advanced → use cookies, `cookies.txt` in `appdata/`), export
-it from a **private/incognito window** that you close *without* logging out — a jar from a
-window you later log out of is invalidated at the source, and no amount of refreshing
-brings it back.
+```
+✗  The uploaded file carries no YouTube login - it was most likely exported while signed out.
+   22 cookies, 0 of them login cookies
+```
+
+```
+✗  YouTube rejected the cookies: [youtube:tab] WL: YouTube said: The playlist does not exist.
+   3 cookies, 2 of them login cookies · a login cookie expired on 21/09/2026 · last checked 21:12:50
+```
+
+**Check now** next to *Set Cookies* asks YouTube straight away, and a fresh upload is
+checked as soon as the dialog closes — no waiting for the next 30-minute round. The check
+is one request against the account's watch-later list, which is the cheapest thing that
+still needs a working login.
+
+Export the jar from a **private/incognito window** that you close *without* logging out —
+a jar from a window you later log out of is invalidated at the source, and no amount of
+refreshing brings it back. Note that a jar exported while signed out is a common and
+otherwise invisible mistake: the file looks perfectly well-formed and contains no login at
+all, which is exactly what the line above reports.
 
 ---
 
