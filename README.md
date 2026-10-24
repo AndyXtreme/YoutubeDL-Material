@@ -1,5 +1,9 @@
 # YoutubeDL-Material – Modernized Edition (Node 20 / Mongo 7)
 
+[![Docker Hub](https://img.shields.io/badge/Docker%20Hub-andyxtreme%2Fyoutubedl--material-2496ED?logo=docker&logoColor=white)](https://hub.docker.com/r/andyxtreme/youtubedl-material)
+[![Docker Pulls](https://img.shields.io/docker/pulls/andyxtreme/youtubedl-material?logo=docker)](https://hub.docker.com/r/andyxtreme/youtubedl-material)
+[![Ko-fi](https://img.shields.io/badge/Ko--fi-Support%20me-FF5E5B?logo=kofi&logoColor=white)](https://ko-fi.com/andyxtreme)
+
 This is a modernized variant of [YoutubeDL-Material](https://github.com/Tzahi12345/YoutubeDL-Material) (by Isaac Grynsztein / Tzahi12345) – a Material Design frontend for [yt-dlp](https://github.com/yt-dlp/yt-dlp) with an Angular frontend and a Node.js backend.
 
 The original project was built on **Node 16** (end-of-life) and **MongoDB 4**. Among other things, this broke the **subscription feature**, because yt-dlp now requires a JavaScript runtime. This edition brings the setup up to a current state and fixes several practical issues.

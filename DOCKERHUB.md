@@ -1,11 +1,7 @@
-## Support
-
-If this edition helps you, I'd appreciate a small donation – thank you! ☕
-
-[![Ko-fi](https://img.shields.io/badge/Ko--fi-Support%20me-FF5E5B?logo=kofi&logoColor=white)](https://ko-fi.com/andyxtreme)
-
-
 # YoutubeDL-Material – Modernized Edition
+
+[![GitHub](https://img.shields.io/badge/GitHub-AndyXtreme%2FYoutubeDL--Material-181717?logo=github&logoColor=white)](https://github.com/AndyXtreme/YoutubeDL-Material)
+[![Ko-fi](https://img.shields.io/badge/Ko--fi-Support%20me-FF5E5B?logo=kofi&logoColor=white)](https://ko-fi.com/andyxtreme)
 
 Material Design web UI for [yt-dlp](https://github.com/yt-dlp/yt-dlp) in a
 container: download video and audio, subscribe to channels and playlists, manage
@@ -268,6 +264,12 @@ download, and what you do with it, is your responsibility.
 Full documentation – build details, the patch itself, volumes and every one of
 the playlist caveats – lives as `README.md` in the source repository:
 <https://github.com/AndyXtreme/YoutubeDL-Material>
+
+## Support
+
+If this edition helps you, I'd appreciate a small donation – thank you! ☕
+
+[![Ko-fi](https://img.shields.io/badge/Ko--fi-Support%20me-FF5E5B?logo=kofi&logoColor=white)](https://ko-fi.com/andyxtreme)
 
 ## Credits & License
 
